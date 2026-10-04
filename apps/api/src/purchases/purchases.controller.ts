@@ -1,4 +1,5 @@
-import { AdminUnavailableGuard } from '../common/admin-unavailable.guard';
+import { ListPurchasesDto } from './dto/list-purchases.dto';
+import { AdminAuthGuard } from '../admin/admin-auth.guard';
 import {
   Body,
   Controller,
@@ -8,6 +9,8 @@ import {
   Param,
   Post,
   UseGuards,
+  Query,
+  Header,
 } from '@nestjs/common';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 import { PurchasesService } from './purchases.service';
@@ -23,13 +26,30 @@ export class PurchasesController {
   }
 
   @Get()
-  @UseGuards(AdminUnavailableGuard)
-  findAll() {
-    return this.purchasesService.findAll();
+  @Header('Cache-Control', 'no-store')
+  @UseGuards(AdminAuthGuard)
+  findAll(@Query() query: ListPurchasesDto) {
+    return this.purchasesService.findAll(query);
   }
 
   @Get(':reference')
   findOne(@Param('reference') reference: string) {
     return this.purchasesService.findOne(reference);
+  }
+}
+
+@Controller('admin/purchases')
+@UseGuards(AdminAuthGuard)
+export class AdminPurchasesController {
+  constructor(private readonly purchasesService: PurchasesService) {}
+  @Get()
+  @Header('Cache-Control', 'no-store')
+  findAll(@Query() query: ListPurchasesDto) {
+    return this.purchasesService.findAll(query);
+  }
+  @Get(':reference')
+  @Header('Cache-Control', 'no-store')
+  findOne(@Param('reference') reference: string) {
+    return this.purchasesService.findOneAdmin(reference);
   }
 }

@@ -1,3 +1,4 @@
+import { ListAccessCodesDto } from './dto/list-access-codes.dto';
 import {
   ConflictException,
   Injectable,
@@ -47,8 +48,11 @@ export class AccessCodesService {
     }
   }
 
-  async findAll() {
+  async findAll(query = new ListAccessCodesDto()) {
     return this.prisma.accessCode.findMany({
+      where: { packageId: query.packageId, status: query.status },
+      take: query.limit,
+      skip: query.offset,
       include: {
         package: true,
       },
@@ -149,6 +153,31 @@ export class AccessCodesService {
     }
   }
 
+  async disable(id: string) {
+    await this.findOne(id);
+    try {
+      return await this.prisma.accessCode.update({
+        where: {
+          id,
+          status: 'AVAILABLE',
+          purchase: { is: null },
+          reservedAt: null,
+          reservationExpiresAt: null,
+          soldAt: null,
+        },
+        data: { status: 'DISABLED' },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      )
+        throw new ConflictException(
+          'Only unused available access codes can be disabled',
+        );
+      throw error;
+    }
+  }
   async reserveAvailableCode(
     packageId: string,
     purchaseId: string,

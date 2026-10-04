@@ -1,3 +1,4 @@
+import { ListPackagesDto } from './dto/list-packages.dto';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PackageStatus, Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,6 +17,14 @@ export class PackagesService {
     return this.prisma.wifiPackage.findMany({
       where: { status: PackageStatus.ACTIVE },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+  findAllAdmin(query: ListPackagesDto) {
+    return this.prisma.wifiPackage.findMany({
+      where: { status: query.status },
+      take: query.limit,
+      skip: query.offset,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
   }
   async findOne(id: string) {

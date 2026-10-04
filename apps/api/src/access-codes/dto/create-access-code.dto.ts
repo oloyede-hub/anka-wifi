@@ -1,10 +1,10 @@
-import { PartialType } from '@nestjs/mapped-types';
 import {
   IsNotEmpty,
   IsString,
   Length,
   Matches,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 export class CreateAccessCodeDto {
   @IsString()
@@ -18,6 +18,15 @@ export class CreateAccessCodeDto {
   @MaxLength(64)
   packageId: string;
 }
-export class UpdateAccessCodeDto extends PartialType(CreateAccessCodeDto, {
-  skipNullProperties: false,
-}) {}
+export class UpdateAccessCodeDto {
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @Length(8, 8)
+  @Matches(/^\S{8}$/)
+  code?: string;
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  packageId?: string;
+}

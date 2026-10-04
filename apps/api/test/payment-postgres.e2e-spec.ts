@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
@@ -96,6 +97,11 @@ describe.skipIf(process.env.RUN_PAYMENT_DB_TESTS !== '1')(
         prisma as unknown as PrismaService,
         codes,
         {
+          verifyWebhookSignature: (raw: Buffer, signature?: string) =>
+            signature ===
+            createHmac('sha512', 'test-provider-secret')
+              .update(raw)
+              .digest('hex'),
           initializeTransaction,
           verifyTransaction,
         } as unknown as PaystackService,
@@ -199,6 +205,100 @@ describe.skipIf(process.env.RUN_PAYMENT_DB_TESTS !== '1')(
       expect(stored.reservationExpiresAt).toBeNull();
     });
 
+    it.each(['webhook-webhook', 'webhook-manual'])(
+      'fulfills only once for simultaneous %s requests',
+      async (mode) => {
+        const { code, references } = await fixture();
+        const initialized = await service.initialize(references[0]);
+        const raw = Buffer.from(
+          JSON.stringify({
+            event: 'charge.success',
+            data: { reference: initialized.paymentReference },
+          }),
+        );
+        const signature = createHmac('sha512', 'test-provider-secret')
+          .update(raw)
+          .digest('hex');
+        await Promise.all([
+          service.handleWebhook(raw, signature),
+          mode === 'webhook-webhook'
+            ? service.handleWebhook(raw, signature)
+            : service.verify(initialized.paymentReference),
+        ]);
+        const stored = await prisma.accessCode.findUniqueOrThrow({
+          where: { id: code.id },
+          include: { purchase: true },
+        });
+        expect(stored.status).toBe('SOLD');
+        expect(stored.purchase?.status).toBe('COMPLETED');
+        const soldAt = stored.soldAt;
+        expect(await service.handleWebhook(raw, signature)).toEqual({
+          received: true,
+        });
+        expect(
+          (
+            await prisma.accessCode.findUniqueOrThrow({
+              where: { id: code.id },
+            })
+          ).soldAt,
+        ).toEqual(soldAt);
+        expect(
+          await prisma.payment.count({
+            where: { purchaseId: stored.purchase!.id, status: 'SUCCESSFUL' },
+          }),
+        ).toBe(1);
+      },
+    );
+    it.each([false, true])(
+      'reconciles failed payments atomically (forced rollback: %s)',
+      async (forceRollback) => {
+        const { code, references } = await fixture();
+        const initialized = await service.initialize(references[0]);
+        await prisma.payment.update({
+          where: { reference: initialized.paymentReference },
+          data: { createdAt: new Date(Date.now() - 3600000) },
+        });
+        const normal = await verifyTransaction(initialized.paymentReference);
+        verifyTransaction.mockResolvedValueOnce({
+          ...normal,
+          data: { ...normal.data, status: 'failed' },
+        });
+        if (forceRollback) {
+          await admin.query(
+            `CREATE FUNCTION reject_recovery() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced test rollback'; END $$`,
+          );
+          await admin.query(
+            `CREATE TRIGGER reject_recovery BEFORE UPDATE ON "Payment" FOR EACH ROW EXECUTE FUNCTION reject_recovery()`,
+          );
+        }
+        try {
+          const result = await service.reconcilePending(5);
+          expect(result.outcomes[0].outcome).toBe(
+            forceRollback ? 'verification_or_fulfillment_error' : 'released',
+          );
+          const stored = await prisma.payment.findUniqueOrThrow({
+            where: { reference: initialized.paymentReference },
+            include: { purchase: true },
+          });
+          const storedCode = await prisma.accessCode.findUniqueOrThrow({
+            where: { id: code.id },
+          });
+          expect(stored.status).toBe(forceRollback ? 'PENDING' : 'FAILED');
+          expect(stored.purchase.accessCodeId).toBe(
+            forceRollback ? code.id : null,
+          );
+          expect(storedCode.status).toBe(
+            forceRollback ? 'RESERVED' : 'AVAILABLE',
+          );
+          if (!forceRollback) await service.initialize(references[0]);
+        } finally {
+          if (forceRollback) {
+            await admin.query(`DROP TRIGGER reject_recovery ON "Payment"`);
+            await admin.query(`DROP FUNCTION reject_recovery()`);
+          }
+        }
+      },
+    );
     it('rolls back SOLD/COMPLETED changes if the payment write fails', async () => {
       const { code, references } = await fixture();
       const initialized = await service.initialize(references[0]);

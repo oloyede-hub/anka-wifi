@@ -9,6 +9,7 @@ import {
   PaystackInitializeResponse,
   PaystackVerifyResponse,
 } from './paystack.types';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -157,5 +158,21 @@ export class PaystackService {
         channel: typeof data.channel === 'string' ? data.channel : '',
       },
     };
+  }
+
+  verifyWebhookSignature(rawBody: Buffer, signature?: string): boolean {
+    if (
+      !Buffer.isBuffer(rawBody) ||
+      typeof signature !== 'string' ||
+      !/^[a-fA-F0-9]{128}$/.test(signature)
+    )
+      return false;
+    const expected = createHmac('sha512', this.secretKey)
+      .update(rawBody)
+      .digest();
+    const received = Buffer.from(signature, 'hex');
+    return (
+      received.length === expected.length && timingSafeEqual(received, expected)
+    );
   }
 }

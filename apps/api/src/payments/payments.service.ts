@@ -1,3 +1,4 @@
+import { ListPaymentsDto } from './dto/list-payments.dto';
 import {
   BadGatewayException,
   BadRequestException,
@@ -5,6 +6,9 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  UnauthorizedException,
+  ServiceUnavailableException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
@@ -32,6 +36,8 @@ type PaymentWithPurchase = Prisma.PaymentGetPayload<{
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+  private reconciliationRunning = false;
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessCodesService: AccessCodesService,
@@ -40,7 +46,8 @@ export class PaymentsService {
   ) {}
 
   async initialize(purchaseReference: string) {
-    const callbackUrl = this.callbackUrl(); // Validate local configuration before reserving inventory.
+    const callbackUrl = this.callbackUrl();
+
     const prepared = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw(
         Prisma.sql`SELECT "id" FROM "Purchase" WHERE "reference" = ${purchaseReference} FOR UPDATE`,
@@ -136,13 +143,84 @@ export class PaymentsService {
     );
     this.validateTransaction(payment, verified.data);
     if (verified.data.status !== 'success') {
-      // Failure/recovery and reservation release will be added with webhook handling.
+      // Uncertain statuses never release inventory through public verification.
       throw new BadRequestException('Payment has not been completed');
     }
     return this.fulfillVerifiedPayment(payment.id, verified.data);
   }
 
-  // Shared business operation for future webhooks. Call only after authoritative provider verification.
+  async handleWebhook(
+    rawBody: Buffer | undefined,
+    signature: string | undefined,
+  ) {
+    if (
+      !rawBody ||
+      !this.paystackService.verifyWebhookSignature(rawBody, signature)
+    )
+      throw new UnauthorizedException('Invalid webhook signature');
+    // Process only the authenticated bytes, never a potentially altered parsed request.body.
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody.toString('utf8'));
+    } catch {
+      throw new BadRequestException('Invalid webhook payload');
+    }
+    if (
+      typeof body !== 'object' ||
+      body === null ||
+      Array.isArray(body) ||
+      !('event' in body) ||
+      typeof body.event !== 'string' ||
+      !body.event ||
+      body.event.length > 128
+    )
+      throw new BadRequestException('Invalid webhook payload');
+    if (body.event !== 'charge.success') return { received: true };
+    if (
+      !('data' in body) ||
+      typeof body.data !== 'object' ||
+      body.data === null ||
+      Array.isArray(body.data) ||
+      !('reference' in body.data) ||
+      typeof body.data.reference !== 'string' ||
+      !/^[A-Za-z0-9.=-]{1,128}$/.test(body.data.reference)
+    )
+      throw new BadRequestException('Invalid webhook payload');
+    try {
+      const payment = await this.prisma.payment.findUnique({
+        where: { reference: body.data.reference },
+        select: { provider: true, status: true },
+      });
+      if (
+        payment?.provider === PaymentProvider.PAYSTACK &&
+        payment.status === PaymentStatus.FAILED
+      ) {
+        this.logger.error(
+          JSON.stringify({ event: 'payment_late_success_requires_review' }),
+        );
+        throw new ConflictException(
+          'Failed payment received a success notification',
+        );
+      }
+      if (
+        !payment ||
+        payment.provider !== PaymentProvider.PAYSTACK ||
+        !(
+          [PaymentStatus.PENDING, PaymentStatus.SUCCESSFUL] as PaymentStatus[]
+        ).includes(payment.status)
+      )
+        return { received: true };
+      // Manual verification and webhooks share validation and the same locked fulfillment.
+      await this.verify(body.data.reference);
+      return { received: true };
+    } catch {
+      // Non-200 permits provider retry, without leaking references, code, contacts or database details.
+      throw new ServiceUnavailableException(
+        'Webhook processing temporarily unavailable',
+      );
+    }
+  }
+  // Shared business operation for webhooks and manual verification. Call only after authoritative provider verification.
   private async fulfillVerifiedPayment(
     paymentId: string,
     verified: PaystackVerifyResponse['data'],
@@ -271,6 +349,160 @@ export class PaymentsService {
     };
   }
 
+  async reconcilePending(limit: number, afterId?: string) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 5)
+      throw new BadRequestException(
+        'Reconciliation limit must be between 1 and 5',
+      );
+    if (this.reconciliationRunning)
+      throw new ConflictException('Reconciliation is already running');
+    this.reconciliationRunning = true;
+    try {
+      const candidates = await this.prisma.payment.findMany({
+        where: {
+          provider: PaymentProvider.PAYSTACK,
+          status: PaymentStatus.PENDING,
+          createdAt: { lte: new Date(Date.now() - 15 * 60 * 1000) },
+          ...(afterId ? { id: { gt: afterId } } : {}),
+        },
+        orderBy: { id: 'asc' },
+        take: limit,
+        select: { id: true, reference: true },
+      });
+      const outcomes: { paymentId: string; outcome: string }[] = [];
+      for (const candidate of candidates) {
+        let outcome: string;
+        try {
+          outcome = await this.reconcileOne(candidate.reference);
+        } catch {
+          // Never log provider responses, exceptions, bearer references or customer data.
+          outcome = 'verification_or_fulfillment_error';
+        }
+        outcomes.push({ paymentId: candidate.id, outcome });
+        if (!['fulfilled', 'released', 'already_resolved'].includes(outcome))
+          this.logger.warn(
+            JSON.stringify({
+              event: 'payment_reconciliation_attention',
+              paymentId: candidate.id,
+              reason: outcome,
+            }),
+          );
+      }
+      this.logger.log(
+        JSON.stringify({
+          event: 'payment_reconciliation_batch',
+          checked: outcomes.length,
+        }),
+      );
+      return {
+        checked: outcomes.length,
+        nextAfterId:
+          candidates.length === limit
+            ? candidates[candidates.length - 1].id
+            : null,
+        outcomes,
+      };
+    } finally {
+      this.reconciliationRunning = false;
+    }
+  }
+
+  private async reconcileOne(reference: string): Promise<string> {
+    const payment = await this.prisma.payment.findUnique({
+      where: { reference },
+      include: paymentInclude,
+    });
+    if (!payment || payment.status !== PaymentStatus.PENDING)
+      return 'already_resolved';
+    const verified = await this.paystackService.verifyTransaction(reference);
+    this.validateTransaction(payment, verified.data);
+    if (verified.data.status === 'success') {
+      await this.fulfillVerifiedPayment(payment.id, verified.data);
+      return 'fulfilled';
+    }
+    if (verified.data.status !== 'failed') return 'provider_status_unresolved';
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Purchase" WHERE "id" = ${payment.purchaseId} FOR UPDATE`,
+      );
+      const current = await tx.payment.findUnique({
+        where: { id: payment.id },
+        include: paymentInclude,
+      });
+      if (!current || current.status !== PaymentStatus.PENDING)
+        return 'already_resolved';
+      this.validateTransaction(current, verified.data);
+      if (current.purchase.status !== PurchaseStatus.PENDING)
+        throw new ConflictException('Purchase requires reconciliation');
+      const other = await tx.payment.findFirst({
+        where: {
+          purchaseId: current.purchaseId,
+          id: { not: current.id },
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.SUCCESSFUL] },
+        },
+      });
+      if (other) throw new ConflictException('Other unresolved payment exists');
+      const code = current.purchase.accessCode;
+      if (
+        !code ||
+        code.status !== AccessCodeStatus.RESERVED ||
+        code.soldAt ||
+        code.packageId !== current.purchase.packageId
+      )
+        throw new ConflictException('Reservation requires reconciliation');
+      const released = await tx.accessCode.updateMany({
+        where: {
+          id: code.id,
+          status: AccessCodeStatus.RESERVED,
+          soldAt: null,
+          purchase: { is: { id: current.purchaseId } },
+        },
+        data: {
+          status: AccessCodeStatus.AVAILABLE,
+          reservedAt: null,
+          reservationExpiresAt: null,
+        },
+      });
+      if (released.count !== 1)
+        throw new ConflictException('Reservation changed');
+      await tx.purchase.update({
+        where: {
+          id: current.purchaseId,
+          status: PurchaseStatus.PENDING,
+          accessCodeId: code.id,
+        },
+        data: { accessCodeId: null },
+      });
+      await tx.payment.update({
+        where: { id: current.id, status: PaymentStatus.PENDING },
+        data: { status: PaymentStatus.FAILED },
+      });
+      return 'released';
+    });
+  }
+
+  findAllAdmin(query: ListPaymentsDto) {
+    return this.prisma.payment.findMany({
+      where: {
+        status: query.status,
+        ...(query.purchaseReference
+          ? { purchase: { reference: query.purchaseReference } }
+          : {}),
+      },
+      take: query.limit,
+      skip: query.offset,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: adminPaymentSelect,
+    });
+  }
+  async findOneAdmin(reference: string) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { reference },
+      select: adminPaymentSelect,
+    });
+    if (!payment) throw new NotFoundException('Payment not found');
+    return payment;
+  }
   private callbackUrl() {
     try {
       const configured = this.configService.get<string>('FRONTEND_URL');
@@ -292,3 +524,14 @@ export class PaymentsService {
     }
   }
 }
+
+const adminPaymentSelect = {
+  reference: true,
+  status: true,
+  provider: true,
+  amount: true,
+  currency: true,
+  paidAt: true,
+  createdAt: true,
+  purchase: { select: { reference: true, status: true, packageId: true } },
+} satisfies Prisma.PaymentSelect;

@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -25,6 +26,13 @@ describe('API HTTP boundaries', () => {
       .useValue(prisma)
       .overrideProvider(PaystackService)
       .useValue({ initializeTransaction: vi.fn(), verifyTransaction: vi.fn() })
+      .overrideProvider(ConfigService)
+      .useValue(
+        new ConfigService({
+          ADMIN_JWT_SECRET:
+            'test-only-secret-for-admin-authentication-0123456789',
+        }),
+      )
       .compile();
     app = module.createNestApplication();
     app.useGlobalPipes(createValidationPipe());
@@ -49,7 +57,7 @@ describe('API HTTP boundaries', () => {
     await request(app.getHttpServer())
       [method as 'get' | 'post' | 'patch'](path)
       .send({})
-      .expect(503);
+      .expect(401);
   });
   it.each([
     { phone: '08012345678', packageId: 'pkg', amount: 1 },
@@ -90,6 +98,13 @@ describe('payment DTO boundaries', () => {
       .useValue({})
       .overrideProvider(PaystackService)
       .useValue({})
+      .overrideProvider(ConfigService)
+      .useValue(
+        new ConfigService({
+          ADMIN_JWT_SECRET:
+            'test-only-secret-for-admin-authentication-0123456789',
+        }),
+      )
       .compile();
     app = module.createNestApplication();
     app.useGlobalPipes(createValidationPipe());

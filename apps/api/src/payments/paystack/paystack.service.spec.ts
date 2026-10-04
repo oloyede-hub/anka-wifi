@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { PaystackService } from './paystack.service';
 
@@ -115,5 +116,40 @@ describe('PaystackService', () => {
         reference,
       }),
     ).rejects.toMatchObject({ status: 502 });
+  });
+});
+
+describe('webhook signature validation', () => {
+  const body = Buffer.from(
+    '{ "event": "charge.success", "data": { "reference": "PAY-test" } }',
+  );
+  const signature = createHmac('sha512', 'test-secret')
+    .update(body)
+    .digest('hex');
+  it.each([
+    undefined,
+    '',
+    'a',
+    '0'.repeat(127),
+    '0'.repeat(129),
+    'z'.repeat(128),
+    '0'.repeat(128),
+  ])('safely rejects malformed/invalid signature %s', (value) => {
+    expect(
+      new PaystackService(config()).verifyWebhookSignature(body, value),
+    ).toBe(false);
+  });
+  it('accepts the exact raw bytes and case-insensitive hexadecimal encoding', () => {
+    const service = new PaystackService(config());
+    expect(service.verifyWebhookSignature(body, signature)).toBe(true);
+    expect(service.verifyWebhookSignature(body, signature.toUpperCase())).toBe(
+      true,
+    );
+    expect(
+      service.verifyWebhookSignature(
+        Buffer.from(JSON.stringify(JSON.parse(body.toString()))),
+        signature,
+      ),
+    ).toBe(false);
   });
 });

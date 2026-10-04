@@ -1,3 +1,4 @@
+import { ListPurchasesDto } from './dto/list-purchases.dto';
 import {
   BadRequestException,
   ConflictException,
@@ -94,9 +95,17 @@ export class PurchasesService {
     });
   }
 
-  async findAll() {
+  async findAll(query = new ListPurchasesDto()) {
     return this.prisma.purchase.findMany({
-      select: publicPurchaseSelect,
+      where: {
+        status: query.status,
+        reference: query.reference,
+        customerId: query.customerId,
+        ...(query.phone ? { customer: { phone: query.phone } } : {}),
+      },
+      take: query.limit,
+      skip: query.offset,
+      select: adminPurchaseSelect,
       orderBy: {
         createdAt: 'desc',
       },
@@ -118,6 +127,14 @@ export class PurchasesService {
     return purchase;
   }
 
+  async findOneAdmin(reference: string) {
+    const purchase = await this.prisma.purchase.findUnique({
+      where: { reference },
+      select: adminPurchaseSelect,
+    });
+    if (!purchase) throw new NotFoundException('Purchase not found');
+    return purchase;
+  }
   private generateReference() {
     const random = randomBytes(16).toString('hex').toUpperCase();
 
@@ -132,4 +149,23 @@ const publicPurchaseSelect = {
   packageId: true,
   createdAt: true,
   completedAt: true,
+} satisfies Prisma.PurchaseSelect;
+
+const adminPurchaseSelect = {
+  ...publicPurchaseSelect,
+  id: true,
+  customer: { select: { id: true, phone: true, email: true } },
+  package: { select: { id: true, name: true, type: true } },
+  accessCode: { select: { id: true, code: true, status: true, soldAt: true } },
+  payment: {
+    select: {
+      reference: true,
+      status: true,
+      provider: true,
+      amount: true,
+      currency: true,
+      paidAt: true,
+      createdAt: true,
+    },
+  },
 } satisfies Prisma.PurchaseSelect;

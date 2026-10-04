@@ -85,6 +85,7 @@ function setup() {
       data: { authorization_url: 'https://checkout.paystack.com/test' },
     }),
     verifyTransaction: vi.fn().mockResolvedValue({ data: verified }),
+    verifyWebhookSignature: vi.fn().mockReturnValue(true),
   };
   const config = new ConfigService({ FRONTEND_URL: 'http://localhost:3000' });
   const service = new PaymentsService(
@@ -108,6 +109,100 @@ function setup() {
 }
 
 describe('PaymentsService', () => {
+  describe('bounded reconciliation', () => {
+    function recovery() {
+      const fixture = setup();
+      const findMany = vi
+        .fn()
+        .mockResolvedValue([
+          { id: fixture.payment.id, reference: fixture.payment.reference },
+        ]);
+      Object.assign(fixture.prisma.payment, { findMany });
+      return { ...fixture, findMany };
+    }
+    it('fulfills verified success using existing atomic fulfillment', async () => {
+      const { service, payment, code, findMany } = recovery();
+      const result = await service.reconcilePending(1, 'cursor');
+      expect(result.outcomes[0].outcome).toBe('fulfilled');
+      expect(payment.status).toBe(PaymentStatus.SUCCESSFUL);
+      expect(code.status).toBe(AccessCodeStatus.SOLD);
+      expect(findMany.mock.calls[0][0]).toMatchObject({
+        take: 1,
+        where: { id: { gt: 'cursor' }, status: 'PENDING' },
+      });
+      expect(result.nextAfterId).toBe(payment.id);
+    });
+    it('releases only authoritative failed attempts and detaches inventory', async () => {
+      const { service, verified, payment, purchase, code } = recovery();
+      verified.status = 'failed';
+      expect((await service.reconcilePending(5)).outcomes[0].outcome).toBe(
+        'released',
+      );
+      expect(payment.status).toBe(PaymentStatus.FAILED);
+      expect(purchase.accessCodeId).toBeNull();
+      expect(code.status).toBe(AccessCodeStatus.AVAILABLE);
+      expect(code.reservedAt).toBeNull();
+    });
+    it.each([
+      'abandoned',
+      'pending',
+      'processing',
+      'ongoing',
+      'queued',
+      'reversed',
+      'unknown',
+    ])('retains inventory for %s', async (status) => {
+      const { service, verified, tx, code } = recovery();
+      verified.status = status;
+      expect((await service.reconcilePending(5)).outcomes[0].outcome).toBe(
+        'provider_status_unresolved',
+      );
+      expect(tx.accessCode.updateMany).not.toHaveBeenCalled();
+      expect(code.status).toBe(AccessCodeStatus.RESERVED);
+    });
+    it('retains inventory on mismatches and provider outages', async () => {
+      const { service, verified, tx, paystack } = recovery();
+      verified.amount = 1;
+      expect((await service.reconcilePending(5)).outcomes[0].outcome).toBe(
+        'verification_or_fulfillment_error',
+      );
+      paystack.verifyTransaction.mockRejectedValue(
+        new Error('secret provider detail'),
+      );
+      expect((await service.reconcilePending(5)).outcomes[0].outcome).toBe(
+        'verification_or_fulfillment_error',
+      );
+      expect(tx.accessCode.updateMany).not.toHaveBeenCalled();
+    });
+    it('does not release when another unresolved attempt exists', async () => {
+      const { service, verified, tx } = recovery();
+      verified.status = 'failed';
+      tx.payment.findFirst.mockResolvedValue({ id: 'other' } as never);
+      expect((await service.reconcilePending(5)).outcomes[0].outcome).toBe(
+        'verification_or_fulfillment_error',
+      );
+      expect(tx.accessCode.updateMany).not.toHaveBeenCalled();
+    });
+    it('bounds batches and excludes concurrent local runs', async () => {
+      const { service, findMany } = recovery();
+      await expect(service.reconcilePending(6)).rejects.toThrow();
+      let finish!: (value: []) => void;
+      findMany.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const first = service.reconcilePending(1);
+      await expect(service.reconcilePending(1)).rejects.toThrow(
+        'already running',
+      );
+      finish([]);
+      await first;
+      findMany.mockResolvedValue([]);
+      expect((await service.reconcilePending(1)).checked).toBe(0);
+    });
+  });
   it('prepares one atomic attempt and returns no reserved code', async () => {
     const { service, tx, paystack, codes } = setup();
     const result = await service.initialize('ANK-test');
@@ -250,5 +345,92 @@ describe('PaymentsService', () => {
     });
     expect(tx.payment.update).not.toHaveBeenCalled();
     expect(tx.purchase.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('payment webhook processing', () => {
+  const body = Buffer.from(
+    JSON.stringify({
+      event: 'charge.success',
+      data: { reference: 'PAY-test', amount: 1 },
+    }),
+  );
+  it('authenticates before parsing or database access', async () => {
+    const { service, paystack, prisma } = setup();
+    paystack.verifyWebhookSignature.mockReturnValue(false);
+    await expect(service.handleWebhook(body, 'bad')).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(prisma.payment.findUnique).not.toHaveBeenCalled();
+  });
+  it.each([
+    'null',
+    '[]',
+    '{}',
+    '{',
+    '{"event":"charge.success","data":[]}',
+    '{"event":"charge.success","data":{"reference":""}}',
+  ])('rejects invalid signed payload %s', async (raw) => {
+    const { service, prisma } = setup();
+    await expect(
+      service.handleWebhook(Buffer.from(raw), 'signed'),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(prisma.payment.findUnique).not.toHaveBeenCalled();
+  });
+  it('acknowledges unsupported events without database access', async () => {
+    const { service, prisma } = setup();
+    expect(
+      await service.handleWebhook(
+        Buffer.from('{"event":"refund.processed"}'),
+        'signed',
+      ),
+    ).toEqual({ received: true });
+    expect(prisma.payment.findUnique).not.toHaveBeenCalled();
+  });
+  it('acknowledges unknown payment without creating anything', async () => {
+    const { service, tx, paystack } = setup();
+    tx.payment.findUnique.mockResolvedValue(null);
+    expect(await service.handleWebhook(body, 'signed')).toEqual({
+      received: true,
+    });
+    expect(tx.payment.create).not.toHaveBeenCalled();
+    expect(paystack.verifyTransaction).not.toHaveBeenCalled();
+  });
+  it('verifies authoritatively and duplicate deliveries fulfill only once', async () => {
+    const { service, tx, paystack } = setup();
+    expect(await service.handleWebhook(body, 'signed')).toEqual({
+      received: true,
+    });
+    expect(await service.handleWebhook(body, 'signed')).toEqual({
+      received: true,
+    });
+    expect(paystack.verifyTransaction).toHaveBeenCalledOnce();
+    expect(tx.accessCode.updateMany).toHaveBeenCalledOnce();
+    expect(tx.payment.update).toHaveBeenCalledOnce();
+  });
+  it.each(['amount', 'currency', 'reference', 'status'])(
+    'does not fulfill a provider %s mismatch',
+    async (field) => {
+      const { service, verified, tx } = setup();
+      if (field === 'amount') verified.amount++;
+      if (field === 'currency') verified.currency = 'USD';
+      if (field === 'reference') verified.reference = 'PAY-other';
+      if (field === 'status') verified.status = 'pending';
+      await expect(service.handleWebhook(body, 'signed')).rejects.toMatchObject(
+        { status: 503, message: 'Webhook processing temporarily unavailable' },
+      );
+      expect(tx.accessCode.updateMany).not.toHaveBeenCalled();
+    },
+  );
+  it('retains pending state and reservation after Paystack timeout', async () => {
+    const { service, paystack, tx, payment, code } = setup();
+    paystack.verifyTransaction.mockRejectedValue(new Error('upstream secret'));
+    await expect(service.handleWebhook(body, 'signed')).rejects.toMatchObject({
+      status: 503,
+    });
+    expect(payment.status).toBe('PENDING');
+    expect(code.status).toBe('RESERVED');
+    expect(tx.payment.update).not.toHaveBeenCalled();
+    expect(tx.accessCode.updateMany).not.toHaveBeenCalled();
   });
 });

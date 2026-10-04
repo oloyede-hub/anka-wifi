@@ -1,3 +1,5 @@
+import { AdminModule } from './admin/admin.module';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { resolve } from 'node:path';
@@ -16,6 +18,8 @@ import { PaymentsModule } from './payments/payments.module';
       envFilePath: resolve(__dirname, '../../../.env'),
     }),
     PrismaModule,
+    AdminModule,
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 30 }]),
     PackagesModule,
     AccessCodesModule,
     PurchasesModule,

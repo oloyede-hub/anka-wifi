@@ -30,3 +30,16 @@ export interface PaystackVerifyResponse {
     channel: string;
   };
 }
+
+export interface PaystackWebhookEvent {
+  event: string;
+
+  data: {
+    id: number;
+    status: string;
+    reference: string;
+    amount: number;
+    currency: string;
+    paid_at: string | null;
+  };
+}
