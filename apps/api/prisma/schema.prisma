@@ -53,6 +53,7 @@ enum PaymentProvider {
   PAYSTACK
   FLUTTERWAVE
   MANUAL
+  OPAY
 }
 
 // ========================

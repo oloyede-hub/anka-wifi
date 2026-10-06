@@ -131,7 +131,7 @@ export function AdminShell({
   }
   return (
     <Identity.Provider value={admin}>
-      <div className="min-h-screen bg-[#f5f8fc] font-[Arial,Helvetica,sans-serif] text-[#081733]">
+      <div className="min-h-screen bg-[#f5f8fc] text-[#081733]">
         <a
           href="#admin-main"
           className="sr-only focus:not-sr-only focus:fixed focus:z-50 focus:bg-white focus:p-3"
