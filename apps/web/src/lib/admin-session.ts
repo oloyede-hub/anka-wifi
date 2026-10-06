@@ -4,7 +4,7 @@ import { adminIdentitySchema } from "./schemas/admin";
 export async function getAdminSession() {
   const token = (await cookies()).get("anka-admin-session")?.value;
   if (!token) return null;
-  const base = process.env.NEXT_PUBLIC_API_URL;
+  const base = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
   if (!base)
     throw new Error(
       "Admin service is unavailable. Check the API configuration.",

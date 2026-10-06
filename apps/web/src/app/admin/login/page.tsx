@@ -12,7 +12,7 @@ export default async function AdminLoginPage() {
   if (await getAdminSession()) redirect("/admin");
   return (
     <main
-      className="flex min-h-screen flex-col items-center justify-center gap-8 bg-slate-50 px-5 py-12"
+      className="flex min-h-screen flex-col items-center justify-center gap-8 bg-surface-muted px-5 py-12"
       id="main-content"
     >
       <Brand />

@@ -1,3 +1,4 @@
+import { dashboardAnalyticsSchema } from "@/lib/schemas/admin-report";
 import { NextRequest, NextResponse } from "next/server";
 import {
   adminPackageSchema,
@@ -29,6 +30,7 @@ async function handle(
   const { path } = await context.params;
   const route = path.join("/");
   const method = request.method;
+  const report = method === "GET" && route === "reports/overview";
   const listPackages = method === "GET" && route === "packages";
   const purchases = method === "GET" && route === "purchases";
   const listCodes = method === "GET" && route === "access-codes";
@@ -62,7 +64,8 @@ async function handle(
     !detail &&
     !addCode &&
     !bulk &&
-    !disable
+    !disable &&
+    !report
   )
     return reply("Not found", 404);
   if (
@@ -72,7 +75,7 @@ async function handle(
     return reply("Request not allowed", 403);
   const token = request.cookies.get("anka-admin-session")?.value;
   if (!token) return reply("Please sign in", 401);
-  const base = process.env.NEXT_PUBLIC_API_URL;
+  const base = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
   if (!base) return reply("Admin service unavailable", 503);
   let body: string | undefined;
   let suffix = "";
@@ -119,7 +122,7 @@ async function handle(
       }
     }
     suffix = "?" + query.toString();
-  } else if (detail || disable) {
+  } else if (detail || disable || report) {
     // Read-only details and the dedicated guarded disable transition have no body.
   } else if (addCode || bulk) {
     try {
@@ -186,27 +189,29 @@ async function handle(
       return response;
     }
     const raw: unknown = await upstream.json();
-    const schema = listCodes
-      ? z.array(accessCodeListSchema)
-      : listPayments
-        ? z.array(adminPaymentSchema)
-        : purchases
-          ? z.array(
-              request.nextUrl.searchParams.has("limit")
+    const schema = report
+      ? dashboardAnalyticsSchema
+      : listCodes
+        ? z.array(accessCodeListSchema)
+        : listPayments
+          ? z.array(adminPaymentSchema)
+          : purchases
+            ? z.array(
+                request.nextUrl.searchParams.has("limit")
+                  ? adminPurchaseSchema
+                  : recentPurchaseSchema,
+              )
+            : detail
+              ? path[0] === "purchases"
                 ? adminPurchaseSchema
-                : recentPurchaseSchema,
-            )
-          : detail
-            ? path[0] === "purchases"
-              ? adminPurchaseSchema
-              : adminPaymentSchema
-            : bulk
-              ? bulkResultSchema
-              : addCode || disable
-                ? accessCodeSchema
-                : listPackages
-                  ? z.array(adminPackageSchema)
-                  : adminPackageSchema;
+                : adminPaymentSchema
+              : bulk
+                ? bulkResultSchema
+                : addCode || disable
+                  ? accessCodeSchema
+                  : listPackages
+                    ? z.array(adminPackageSchema)
+                    : adminPackageSchema;
     const data = schema.parse(raw);
     return NextResponse.json(data, {
       headers: { "Cache-Control": "no-store" },

@@ -32,7 +32,7 @@ export class PaymentsController {
   @Header('Cache-Control', 'no-store')
   @HttpCode(HttpStatus.OK)
   initialize(@Body() dto: InitializePaymentDto) {
-    return this.paymentsService.initialize(dto.purchaseReference);
+    return this.paymentsService.initialize(dto.purchaseReference, dto.provider);
   }
 
   @Get('verify/:reference')
@@ -51,6 +51,13 @@ export class PaymentsController {
     signature?: string,
   ) {
     return this.paymentsService.handleWebhook(request.rawBody, signature);
+  }
+
+  @Post('opay/webhook')
+  @HttpCode(HttpStatus.OK)
+  @Header('Cache-Control', 'no-store')
+  opayWebhook(@Req() request: RawBodyRequest<Request>) {
+    return this.paymentsService.handleOpayWebhook(request.rawBody);
   }
 }
 

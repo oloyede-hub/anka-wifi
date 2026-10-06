@@ -102,7 +102,10 @@ export function useAddCodes(bulk: boolean) {
       return bulk ? bulkResultSchema.parse(result) : null;
     },
     onSuccess: () =>
-      client.invalidateQueries({ queryKey: ["admin", "access-codes"] }),
+      Promise.all([
+        client.invalidateQueries({ queryKey: ["admin", "access-codes"] }),
+        client.invalidateQueries({ queryKey: ["admin", "reports"] }),
+      ]),
   });
 }
 export function useDisableCode() {
@@ -114,6 +117,9 @@ export function useDisableCode() {
         method: "POST",
       }),
     onSuccess: () =>
-      client.invalidateQueries({ queryKey: ["admin", "access-codes"] }),
+      Promise.all([
+        client.invalidateQueries({ queryKey: ["admin", "access-codes"] }),
+        client.invalidateQueries({ queryKey: ["admin", "reports"] }),
+      ]),
   });
 }

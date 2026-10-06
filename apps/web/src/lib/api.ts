@@ -1,4 +1,12 @@
 import { paymentReferenceSchema } from "./schemas/customer";
+import { z } from "zod";
+export type CheckoutProvider = "PAYSTACK" | "OPAY";
+const checkoutResponseSchema = z.object({
+  purchaseReference: paymentReferenceSchema,
+  paymentReference: paymentReferenceSchema,
+  provider: z.enum(["PAYSTACK", "OPAY"]),
+  authorizationUrl: z.url(),
+});
 export interface WifiPackage {
   id: string;
   name: string;
@@ -9,12 +17,16 @@ export interface WifiPackage {
   featured: boolean;
 }
 export interface VerifiedPayment {
-  payment: { reference: string; status: string };
+  payment: { reference: string; status: string; provider: CheckoutProvider };
   purchase: { reference: string; status: string; package: string };
   accessCode: string;
 }
 export class ApiError extends Error {
-  constructor(public status: number) {
+  constructor(
+    public status: number,
+    public paymentReference?: string,
+    public paymentState?: "PENDING" | "FAILED",
+  ) {
     super("We couldn’t complete this request. Please try again.");
   }
 }
@@ -30,7 +42,20 @@ async function request<T>(
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!response.ok) throw new ApiError(response.status);
+  if (!response.ok) {
+    const detail: unknown = await response.json().catch(() => null);
+    const parsed = z
+      .object({
+        paymentReference: paymentReferenceSchema.optional(),
+        paymentState: z.enum(["PENDING", "FAILED"]).optional(),
+      })
+      .safeParse(detail);
+    throw new ApiError(
+      response.status,
+      parsed.success ? parsed.data.paymentReference : undefined,
+      parsed.success ? parsed.data.paymentState : undefined,
+    );
+  }
   return response.json() as Promise<T>;
 }
 export const getPackages = (signal?: AbortSignal) =>
@@ -40,12 +65,13 @@ export const createPurchase = (body: {
   phone: string;
   email: string;
 }) => request<{ reference: string }>("purchases", body);
-export const initializePayment = (purchaseReference: string) =>
-  request<{
-    purchaseReference: string;
-    paymentReference: string;
-    authorizationUrl: string;
-  }>("payments/initialize", { purchaseReference });
+export const initializePayment = async (input: {
+  purchaseReference: string;
+  provider: CheckoutProvider;
+}) =>
+  checkoutResponseSchema.parse(
+    await request<unknown>("payments/initialize", input),
+  );
 export const verifyPayment = (reference: string, signal?: AbortSignal) =>
   request<VerifiedPayment>(
     `payments/verify/${encodeURIComponent(reference)}`,

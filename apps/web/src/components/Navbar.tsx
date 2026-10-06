@@ -1,4 +1,5 @@
 "use client";
+import { Button, buttonStyles } from "@/components/ui/Button";
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -46,12 +47,12 @@ export function Navbar() {
   return (
     <>
       <Link
-        className="absolute -top-20 left-5 z-50 bg-white p-3 focus:top-3"
+        className="absolute -top-20 left-5 z-50 bg-surface p-3 focus:top-3"
         href="#main-content"
       >
         Skip to content
       </Link>
-      <header className="relative z-30 border-b border-line bg-white/95">
+      <header className="relative z-30 border-b border-line bg-surface/95">
         <div className="mx-auto flex min-h-[68px] w-[calc(100%-40px)] max-w-[1080px] items-center justify-between md:min-h-[76px] md:w-[calc(100%-64px)]">
           <Brand />
           <nav
@@ -68,7 +69,11 @@ export function Navbar() {
               </Link>
             ))}
             <Link
-              className="inline-flex min-h-10 items-center justify-center rounded-full border border-[#b9d1ff] bg-white px-5 py-2 text-brand-dark transition-colors hover:bg-[#eef5ff] motion-reduce:transition-none"
+              className={buttonStyles({
+                variant: "outline",
+                size: "nav",
+                shape: "pill",
+              })}
               href="/payment/check"
             >
               Check Payment
@@ -86,9 +91,11 @@ export function Navbar() {
                 setOpen(false);
             }}
           >
-            <button
+            <Button
+              variant="plain"
+              size="none"
               ref={toggle}
-              className="inline-flex size-11 items-center justify-center rounded-lg border border-[#b9d1ff] text-brand-dark transition-colors hover:bg-blue-50 motion-reduce:transition-none"
+              className="inline-flex size-11 items-center justify-center rounded-lg border border-brand-border text-brand-dark transition-colors hover:bg-info-soft motion-reduce:transition-none"
               type="button"
               aria-label={
                 expanded ? "Close navigation menu" : "Open navigation menu"
@@ -116,16 +123,16 @@ export function Navbar() {
                   <path d="M4 6h16M4 12h16M4 18h16" />
                 )}
               </svg>
-            </button>
+            </Button>
             <nav
               id="mobile-navigation"
               hidden={!expanded}
-              className="absolute top-[52px] right-0 w-[min(240px,calc(100vw-40px))] rounded-xl border border-line bg-white p-3 shadow-[0_10px_30px_#07153422]"
+              className="absolute top-[52px] right-0 w-[min(240px,calc(100vw-40px))] rounded-xl border border-line bg-surface p-3 shadow-navigation"
               aria-label="Mobile navigation"
             >
               {links.map(({ href, label }) => (
                 <Link
-                  className="block rounded-lg px-3 py-3 text-sm font-medium hover:bg-blue-50 hover:text-brand"
+                  className="block rounded-lg px-3 py-3 text-sm font-medium hover:bg-info-soft hover:text-brand"
                   href={href}
                   key={href}
                   onClick={() => setOpen(false)}
@@ -134,7 +141,7 @@ export function Navbar() {
                 </Link>
               ))}
               <Link
-                className="mt-2 block rounded-lg bg-blue-50 px-3 py-3 text-sm font-semibold text-brand-dark hover:bg-blue-100"
+                className="mt-2 block rounded-lg bg-info-soft px-3 py-3 text-sm font-semibold text-brand-dark hover:bg-info-decoration"
                 href="/payment/check"
                 onClick={() => setOpen(false)}
               >

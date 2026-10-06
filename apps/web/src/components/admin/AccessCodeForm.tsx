@@ -1,4 +1,7 @@
 "use client";
+import { Button } from "@/components/ui/Button";
+import { Input, Select, Textarea } from "@/components/ui/FormControls";
+
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -8,7 +11,6 @@ import {
 } from "@/lib/schemas/admin-operations";
 import { useAddCodes } from "@/lib/admin-operations";
 import { adminError, useAdminPackages } from "@/lib/admin-management";
-import { inputClass, primaryClass } from "./OperationsUI";
 import { QueryError } from "./AdminUI";
 export function AccessCodeForm({ bulk }: { bulk: boolean }) {
   const packages = useAdminPackages();
@@ -41,13 +43,13 @@ export function AccessCodeForm({ bulk }: { bulk: boolean }) {
   );
   const feedback = (
     <>
-      <p role="alert" className="text-sm text-rose-700">
+      <p role="alert" className="text-sm text-danger-deep">
         {mutation.isError ? adminError(mutation.error) : ""}
       </p>
       {mutation.isSuccess && (
         <p
           role="status"
-          className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800"
+          className="rounded-lg bg-success-soft p-3 text-sm text-success-deep"
         >
           {result
             ? `Created ${result.created} of ${result.requested}. Skipped ${result.skipped}: ${result.duplicatesInRequest} duplicates in entry, ${result.alreadyStored} already stored.`
@@ -77,37 +79,39 @@ export function AccessCodeForm({ bulk }: { bulk: boolean }) {
       </p>
       <label className="block text-sm">
         Package
-        <select
+        <Select
           aria-label="Package"
-          className={inputClass + " mt-2"}
+          className={" mt-2"}
           disabled={packages.isPending || mutation.isPending}
           {...form.register("packageId")}
         >
           {options}
-        </select>
+        </Select>
       </label>
-      <p role="alert" className="text-xs text-rose-700">
+      <p role="alert" className="text-xs text-danger-deep">
         {form.formState.errors.packageId?.message}
       </p>
       <label className="block text-sm">
         Codes
-        <textarea
+        <Textarea
           rows={10}
-          className={inputClass + " mt-2 font-mono"}
+          className={" mt-2 font-mono"}
           {...form.register("text")}
           disabled={mutation.isPending}
         />
       </label>
-      <p role="alert" className="text-xs text-rose-700">
+      <p role="alert" className="text-xs text-danger-deep">
         {form.formState.errors.text?.message}
       </p>
       {feedback}
-      <button
-        className={primaryClass + " w-full"}
+      <Button
+        variant="primary"
+        size="md"
+        className={" w-full"}
         disabled={packages.isPending || mutation.isPending}
       >
         {mutation.isPending ? "Adding..." : "Add codes"}
-      </button>
+      </Button>
     </form>
   ) : (
     <form
@@ -126,37 +130,39 @@ export function AccessCodeForm({ bulk }: { bulk: boolean }) {
       </p>
       <label className="block text-sm">
         Package
-        <select
+        <Select
           aria-label="Package"
-          className={inputClass + " mt-2"}
+          className={" mt-2"}
           disabled={packages.isPending || mutation.isPending}
           {...single.register("packageId")}
         >
           {options}
-        </select>
+        </Select>
       </label>
-      <p role="alert" className="text-xs text-rose-700">
+      <p role="alert" className="text-xs text-danger-deep">
         {single.formState.errors.packageId?.message}
       </p>
       <label className="block text-sm">
         Access code
-        <input
-          className={inputClass + " mt-2 font-mono"}
+        <Input
+          className={" mt-2 font-mono"}
           {...single.register("code")}
           disabled={mutation.isPending}
           autoComplete="off"
         />
       </label>
-      <p role="alert" className="text-xs text-rose-700">
+      <p role="alert" className="text-xs text-danger-deep">
         {single.formState.errors.code?.message}
       </p>
       {feedback}
-      <button
-        className={primaryClass + " w-full"}
+      <Button
+        variant="primary"
+        size="md"
+        className={" w-full"}
         disabled={packages.isPending || mutation.isPending}
       >
         {mutation.isPending ? "Adding..." : "Add code"}
-      </button>
+      </Button>
     </form>
   );
 }

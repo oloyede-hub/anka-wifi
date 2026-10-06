@@ -1,6 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useAdminPackages, useSavePackage } from "@/lib/admin-management";
+import { useDashboardAnalytics } from "@/lib/admin-analytics";
+import { Button } from "@/components/ui/Button";
+import { Pagination } from "@/components/ui/Pagination";
+import { Input, Select } from "@/components/ui/FormControls";
+import { Dialog } from "@/components/ui/Dialog";
 import type { AdminPackage } from "@/lib/schemas/admin-package";
 import { formatNaira } from "@/lib/formatting";
 import {
@@ -13,24 +18,13 @@ import {
 } from "./AdminUI";
 import { AdminIcon } from "./AdminIcon";
 import { PackageForm } from "./PackageForm";
-function averagePrice(items: AdminPackage[]) {
-  if (!items.length) return "—";
-  const total = items.reduce((sum, item) => {
-    const [whole, decimal = ""] = item.price.split(".");
-    return sum + BigInt(whole) * BigInt(100) + BigInt(decimal.padEnd(2, "0"));
-  }, BigInt(0));
-  const count = BigInt(items.length);
-  const average = (total + count / BigInt(2)) / count;
-  return formatNaira(
-    `${average / BigInt(100)}.${(average % BigInt(100)).toString().padStart(2, "0")}`,
-  );
-}
 export function PackagesManager({
   startCreating = false,
 }: {
   startCreating?: boolean;
 }) {
   const query = useAdminPackages();
+  const report = useDashboardAnalytics();
   const changeStatus = useSavePackage();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -105,36 +99,38 @@ export function PackagesManager({
       <details className="relative">
         <summary
           aria-label={"Actions for " + item.name}
-          className="cursor-pointer list-none rounded p-2 text-lg hover:bg-slate-100"
+          className="cursor-pointer list-none rounded p-2 text-lg hover:bg-surface-soft"
         >
           ⋮
         </summary>
-        <div className="absolute right-0 z-10 w-40 rounded-lg border border-line bg-white p-1 shadow-lg">
-          <button
+        <div className="absolute right-0 z-10 w-40 rounded-lg border border-line bg-surface p-1 shadow-lg">
+          <Button
+            variant="plain"
+            size="none"
             onClick={(event) => {
               event.currentTarget.closest("details")?.removeAttribute("open");
               openForm(item);
             }}
-            className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50"
+            className="w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-muted"
           >
             Edit
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="plain"
+            size="none"
             disabled={changeStatus.isPending}
             onClick={(event) => {
               event.currentTarget.closest("details")?.removeAttribute("open");
               void toggle(item);
             }}
-            className="w-full rounded px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-50"
+            className="w-full rounded px-3 py-2 text-left text-sm hover:bg-surface-muted disabled:opacity-50"
           >
             {item.status === "ACTIVE" ? "Deactivate" : "Activate"}
-          </button>
+          </Button>
         </div>
       </details>
     );
   }
-  const filterClass =
-    "min-h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm";
   return (
     <div className="space-y-5">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
@@ -146,35 +142,30 @@ export function PackagesManager({
             Create and manage Wi-Fi packages for your customers.
           </p>
         </div>
-        <button
+        <Button
+          variant="primary"
           onClick={() => openForm()}
-          className="flex items-center gap-2 rounded-lg bg-brand px-5 py-3 text-sm font-semibold text-white hover:bg-brand-dark"
+          className="gap-2 px-5 py-3"
         >
           <AdminIcon name="plus" className="size-5" />
           Add Package
-        </button>
+        </Button>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
         <StatCard
           label="Total Packages"
           value={
-            query.isPending
-              ? "…"
-              : query.isError || !complete
-                ? "—"
-                : items.length
+            report.data?.summaries.packages.total ??
+            (report.isPending ? "\u2026" : "\u2014")
           }
-          detail={complete ? "Across all packages" : "Loading package totals"}
+          detail="Across all packages"
           icon="package"
         />
         <StatCard
           label="Active Packages"
           value={
-            query.isPending
-              ? "…"
-              : query.isError || !complete
-                ? "—"
-                : items.filter((p) => p.status === "ACTIVE").length
+            report.data?.summaries.packages.statuses.ACTIVE ??
+            (report.isPending ? "\u2026" : "\u2014")
           }
           detail="Available for customers"
           icon="check"
@@ -183,11 +174,8 @@ export function PackagesManager({
         <StatCard
           label="Inactive Packages"
           value={
-            query.isPending
-              ? "…"
-              : query.isError || !complete
-                ? "—"
-                : items.filter((p) => p.status === "INACTIVE").length
+            report.data?.summaries.packages.statuses.INACTIVE ??
+            (report.isPending ? "\u2026" : "\u2014")
           }
           detail="Not shown to customers"
           icon="pause"
@@ -196,21 +184,24 @@ export function PackagesManager({
         <StatCard
           label="Average Price"
           value={
-            query.isPending
-              ? "…"
-              : query.isError || !complete
-                ? "—"
-                : averagePrice(items)
+            report.data
+              ? formatNaira(report.data.summaries.packages.averagePrice)
+              : report.isPending
+                ? "\u2026"
+                : "\u2014"
           }
           detail="Across all packages"
           icon="tag"
           tone="purple"
         />
       </div>
+      {report.isError && (
+        <QueryError error={report.error} retry={() => void report.refetch()} />
+      )}
       {feedback && (
         <p
           role="status"
-          className="rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-700"
+          className="rounded-lg border border-success-decoration bg-success-soft p-3 text-sm text-success"
         >
           {feedback}
         </p>
@@ -234,45 +225,45 @@ export function PackagesManager({
                 name="search"
                 className="absolute left-3 top-2.5 size-5 text-muted"
               />
-              <input
+              <Input
                 value={search}
                 onChange={(e) => {
                   setSearch(e.target.value);
                   setPage(0);
                 }}
                 placeholder="Search packages…"
-                className={filterClass + " w-full pl-10"}
+                className="w-full pl-10"
               />
             </label>
-            <select
+            <Select
               aria-label="Filter status"
               value={status}
               onChange={(e) => {
                 setStatus(e.target.value);
                 setPage(0);
               }}
-              className={filterClass}
             >
               <option value="">All Status</option>
               <option value="ACTIVE">Active</option>
               <option value="INACTIVE">Inactive</option>
-            </select>
-            <select
+            </Select>
+            <Select
               aria-label="Filter type"
               value={type}
               onChange={(e) => {
                 setType(e.target.value);
                 setPage(0);
               }}
-              className={filterClass}
             >
               <option value="">All Types</option>
               <option value="DAILY">Daily</option>
               <option value="WEEKLY">Weekly</option>
               <option value="MONTHLY">Monthly</option>
-            </select>
-            <button
-              className={filterClass + " text-muted hover:bg-slate-50"}
+            </Select>
+            <Button
+              variant="plain"
+              size="none"
+              className="text-muted"
               onClick={() => {
                 setSearch("");
                 setStatus("");
@@ -281,7 +272,7 @@ export function PackagesManager({
               }}
             >
               Clear
-            </button>
+            </Button>
           </div>
           {query.isPending ? (
             <RowsSkeleton />
@@ -293,9 +284,9 @@ export function PackagesManager({
           ) : (
             <>
               {!complete && (
-                <p className="mb-3 text-sm text-amber-700">
-                  Showing the first 10,000 packages. Totals are unavailable for
-                  this dataset.
+                <p className="mb-3 text-sm text-warning">
+                  Showing the first 10,000 packages. Summary totals include all
+                  packages.
                 </p>
               )}
               {filtered.length === 0 ? (
@@ -306,19 +297,21 @@ export function PackagesManager({
                       : "No Wi-Fi packages have been created yet."}
                   </p>
                   {!items.length && (
-                    <button
+                    <Button
+                      variant="plain"
+                      size="none"
                       onClick={() => openForm()}
                       className="mt-3 text-sm font-semibold text-brand"
                     >
                       Create Package
-                    </button>
+                    </Button>
                   )}
                 </div>
               ) : (
                 <>
                   <div className="hidden overflow-x-auto pb-20 md:block">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-muted">
+                      <thead className="bg-surface-muted text-muted">
                         <tr>
                           {[
                             "Name",
@@ -343,7 +336,7 @@ export function PackagesManager({
                             </td>
                             <td className="px-3 py-5">
                               <span
-                                className={`rounded-md px-2 py-1 text-xs ${item.type === "DAILY" ? "bg-blue-50 text-brand" : item.type === "WEEKLY" ? "bg-emerald-50 text-emerald-700" : "bg-violet-50 text-violet-600"}`}
+                                className={`rounded-md px-2 py-1 text-xs ${item.type === "DAILY" ? "bg-info-soft text-brand" : item.type === "WEEKLY" ? "bg-success-soft text-success" : "bg-purple-soft text-purple"}`}
                               >
                                 {item.type.charAt(0) +
                                   item.type.slice(1).toLowerCase()}
@@ -400,34 +393,15 @@ export function PackagesManager({
                   </div>
                 </>
               )}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-                <p className="text-xs text-muted">
-                  Showing {filtered.length ? page * 6 + 1 : 0} to{" "}
-                  {Math.min((page + 1) * 6, filtered.length)} of{" "}
-                  {filtered.length} packages
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    aria-label="Previous page"
-                    disabled={page === 0}
-                    onClick={() => setPage((p) => p - 1)}
-                    className="size-9 rounded-lg border border-line text-muted disabled:opacity-40"
-                  >
-                    ‹
-                  </button>
-                  <span className="grid size-9 place-items-center rounded-lg bg-brand text-sm text-white">
-                    {page + 1}
-                  </span>
-                  <button
-                    aria-label="Next page"
-                    disabled={(page + 1) * 6 >= filtered.length}
-                    onClick={() => setPage((p) => p + 1)}
-                    className="size-9 rounded-lg border border-line text-muted disabled:opacity-40"
-                  >
-                    ›
-                  </button>
-                </div>
-              </div>
+              <Pagination
+                page={page}
+                pageSize={6}
+                count={shown.length}
+                total={filtered.length}
+                hasNext={(page + 1) * 6 < filtered.length}
+                busy={query.isFetching}
+                change={setPage}
+              />
             </>
           )}
         </section>
@@ -436,12 +410,14 @@ export function PackagesManager({
             {editing ? "Edit Package" : "Create Package"}
           </h2>
           <div className="mb-5 mt-4 flex border-b border-line text-sm">
-            <button
+            <Button
+              variant="plain"
+              size="none"
               onClick={() => openForm()}
               className={`flex-1 border-b-2 py-3 ${!editing ? "border-brand font-semibold text-brand" : "border-transparent text-muted"}`}
             >
               Create New
-            </button>
+            </Button>
             <span
               className={`flex-1 border-b-2 py-3 text-center ${editing ? "border-brand font-semibold text-brand" : "border-transparent text-muted"}`}
             >
@@ -455,29 +431,31 @@ export function PackagesManager({
           />
         </div>
       </div>
-      <dialog
+      <Dialog
+        placement="center"
         ref={dialog}
         aria-labelledby="package-dialog-title"
-        className="fixed m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-xl border border-line bg-white p-6 shadow-xl backdrop:bg-slate-950/50"
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 id="package-dialog-title" className="text-xl font-bold">
             {editing ? "Edit Package" : "Create Package"}
           </h2>
-          <button
+          <Button
+            variant="plain"
+            size="none"
             onClick={() => dialog.current?.close()}
             aria-label="Close package form"
-            className="rounded px-2 py-1 text-xl hover:bg-slate-100"
+            className="rounded px-2 py-1 text-xl hover:bg-surface-soft"
           >
             ×
-          </button>
+          </Button>
         </div>
         <PackageForm
           key={(editing?.id ?? "new") + version}
           item={editing}
           onSaved={saved}
         />
-      </dialog>
+      </Dialog>
     </div>
   );
 }

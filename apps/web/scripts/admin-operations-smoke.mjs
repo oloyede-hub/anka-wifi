@@ -38,7 +38,8 @@ const codes = ["AVAILABLE", "RESERVED", "SOLD", "DISABLED"].map(
 const attempts = ["FAILED", "FAILED", "SUCCESSFUL"].map((status, index) => ({
   reference: `PAY-test-${index}`,
   status,
-  provider: "PAYSTACK",
+  provider: index === 0 ? "PAYSTACK" : "OPAY",
+  providerReference: status === "SUCCESSFUL" ? "OPAY-order-test-2" : null,
   amount: "1200.50",
   currency: "NGN",
   paidAt: status === "SUCCESSFUL" ? stamp : null,
@@ -100,7 +101,67 @@ const backend = http.createServer(async (req, res) => {
   let result;
   if (url.pathname === "/admin/auth/me")
     result = { id: "admin-1", name: "Test Admin", email: "staff@example.com" };
-  else if (url.pathname === "/admin/packages") result = [plan];
+  else if (url.pathname === "/admin/reports/overview") {
+    const summary = (items, statuses) => ({
+      total: items.length,
+      statuses: Object.fromEntries(
+        statuses.map((status) => [
+          status,
+          items.filter((item) => item.status === status).length,
+        ]),
+      ),
+    });
+    const series = {
+      daily: [{ label: "29 Sep", amount: "0.00" }, { label: "30 Sep", amount: "1200.50" }],
+      weekly: [{ label: "21 Sep", amount: "0.00" }, { label: "28 Sep", amount: "1200.50" }],
+      monthly: [{ label: "Aug 2026", amount: "0.00" }, { label: "Sep 2026", amount: "1200.50" }],
+    };
+    const paymentSummary = summary(payments, [
+      "PENDING",
+      "SUCCESSFUL",
+      "FAILED",
+      "REFUNDED",
+    ]);
+    result = {
+      asOf: stamp,
+      timeZone: "Africa/Lagos",
+      currency: "NGN",
+      totals: {
+        purchases: purchases.length,
+        revenue: "1200.50",
+        codesSold: codes.filter((c) => c.status === "SOLD").length,
+        availableCodes: codes.filter((c) => c.status === "AVAILABLE").length,
+      },
+      summaries: {
+        purchases: summary(purchases, [
+          "PENDING",
+          "COMPLETED",
+          "FAILED",
+          "CANCELLED",
+        ]),
+        payments: paymentSummary,
+        accessCodes: summary(codes, [
+          "AVAILABLE",
+          "RESERVED",
+          "SOLD",
+          "DISABLED",
+        ]),
+        packages: {
+          ...summary([plan], ["ACTIVE", "INACTIVE"]),
+          averagePrice: plan.price,
+        },
+      },
+      sales: series,
+      paymentVolume: series,
+      paymentStatus: Object.entries(paymentSummary.statuses).map(
+        ([label, count]) => ({
+          label: label.charAt(0) + label.slice(1).toLowerCase(),
+          count,
+        }),
+      ),
+      packageSales: [{ label: plan.name, count: 1 }],
+    };
+  } else if (url.pathname === "/admin/packages") result = [plan];
   else if (url.pathname === "/admin/access-codes/bulk") {
     const input = JSON.parse(body);
     const unique = [...new Set(input.codes)];
@@ -197,6 +258,7 @@ const child = spawn(
     env: {
       ...process.env,
       NEXT_PUBLIC_API_URL: `http://127.0.0.1:${backend.address().port}`,
+      API_URL: `http://127.0.0.1:${backend.address().port}`,
       ANKA_WEB_DIST_DIR: ".next/operations-smoke",
     },
     windowsHide: true,
@@ -272,6 +334,9 @@ try {
   const details = await (await call("purchases/ANK-test-0")).json();
   assert.equal(details.payment.length, 3);
   assert.equal(details.payment[2].status, "SUCCESSFUL");
+  assert.equal(details.payment[0].provider, "PAYSTACK");
+  assert.equal(details.payment[2].provider, "OPAY");
+  assert.equal(details.payment[2].providerReference, "OPAY-order-test-2");
   assert.equal(details.accessCode.soldAt, stamp);
   assert.equal(
     (await (await call("purchases/ANK-test-1")).json()).accessCode,
@@ -280,6 +345,10 @@ try {
   assert.equal(
     (await (await call("payments/PAY-test-2")).json()).purchase.reference,
     "ANK-test-0",
+  );
+  assert.equal(
+    (await (await call("payments/PAY-test-2")).json()).providerReference,
+    "OPAY-order-test-2",
   );
   assert.equal(
     (
@@ -365,6 +434,42 @@ try {
       .getByRole("cell", { name: "Test Wi-Fi package", exact: true })
       .first()
       .waitFor();
+    assert(
+      await page
+        .getByRole("heading", { name: "Access Codes", exact: true })
+        .first()
+        .evaluate((element) =>
+          getComputedStyle(element)
+            .fontFamily.toLowerCase()
+            .includes("montserrat"),
+        ),
+      "Admin screens must inherit the configured font",
+    );
+    assert(
+      await page.evaluate(
+        () =>
+          getComputedStyle(document.documentElement)
+            .getPropertyValue("--color-chart-primary")
+            .trim().length > 0,
+      ),
+      "Chart tokens must be available to SVG charts",
+    );
+    assert(
+      await page
+        .getByRole("button", { name: "Bulk add codes", exact: true })
+        .evaluate((element) => {
+          const probe = document.createElement("span");
+          probe.style.backgroundColor = "var(--color-brand)";
+          document.body.append(probe);
+          const expected = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return (
+            expected !== "rgba(0, 0, 0, 0)" &&
+            getComputedStyle(element).backgroundColor === expected
+          );
+        }),
+      "Shared primary buttons must resolve the brand theme color",
+    );
     await page.getByLabel("Search code", { exact: true }).fill("TEST0002");
     assert.equal(await page.locator("tbody tr").count(), 1);
     await page
@@ -459,11 +564,13 @@ try {
       .getByRole("button", { name: "Close Purchase Details" })
       .click();
     await page.goto(base + "/admin/payments");
-    await page
-      .getByText("No payment analytics available for this period.", {
-        exact: true,
-      })
-      .waitFor();
+    await page.locator(".recharts-area-curve").waitFor();
+    await page.locator(".recharts-pie").waitFor();
+    const volume = page.getByRole("region", { name: "Payment Volume" });
+    await volume.getByRole("button", { name: "Weekly", exact: true }).click();
+    await volume
+      .getByText("28 Sep: ", { exact: false })
+      .waitFor({ state: "attached" });
     await page.getByRole("button", { name: "Successful", exact: true }).click();
     await page
       .getByRole("button", { name: "PAY-test-2", exact: true })
@@ -479,6 +586,21 @@ try {
       fullPage: true,
     });
     await page.keyboard.press("Escape");
+    await page.goto(base + "/admin");
+    await page
+      .getByRole("region", { name: "Sales Overview" })
+      .locator(".recharts-area-curve")
+      .waitFor();
+    await page
+      .getByRole("region", { name: "Package Sales" })
+      .locator(".recharts-pie")
+      .waitFor();
+    await page.getByText("Total Purchases", { exact: true }).waitFor();
+    await page.goto(base + "/admin/packages");
+    await page.getByText("Average Price", { exact: true }).waitFor();
+    await page
+      .getByRole("heading", { name: "All Packages", exact: true })
+      .waitFor();
     await page.setViewportSize({ width: 390, height: 844 });
     for (const route of ["access-codes", "purchases", "payments"]) {
       await page.goto(`${base}/admin/${route}`);

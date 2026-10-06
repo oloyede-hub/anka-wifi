@@ -1,7 +1,10 @@
+import { Badge, type BadgeTone } from "@/components/ui/Badge";
+import { Panel, panelStyles as panelClass } from "@/components/ui/Panel";
+
+import { Button } from "@/components/ui/Button";
 import { AdminIcon, type AdminIconName } from "./AdminIcon";
 import { adminError } from "@/lib/admin-management";
-export const panelClass =
-  "rounded-xl border border-line bg-white shadow-[0_3px_16px_rgba(30,64,110,0.035)]";
+export { panelClass };
 export function StatCard({
   label,
   value,
@@ -16,14 +19,14 @@ export function StatCard({
   tone?: "blue" | "green" | "amber" | "purple" | "red";
 }) {
   const tones = {
-    blue: "bg-blue-50 text-brand",
-    green: "bg-emerald-50 text-emerald-600",
-    amber: "bg-amber-50 text-amber-500",
-    purple: "bg-violet-50 text-violet-600",
-    red: "bg-rose-50 text-rose-600",
+    blue: "bg-info-soft text-brand",
+    green: "bg-success-soft text-success",
+    amber: "bg-warning-soft text-warning",
+    purple: "bg-purple-soft text-purple",
+    red: "bg-danger-soft text-danger-strong",
   };
   return (
-    <div className={panelClass + " flex items-start gap-5 p-5 xl:p-6"}>
+    <Panel className="flex items-start gap-5 p-5 xl:p-6">
       <span
         className={`grid size-14 shrink-0 place-items-center rounded-[20px] ${tones[tone]}`}
       >
@@ -36,7 +39,7 @@ export function StatCard({
             <span
               role="status"
               aria-label={"Loading " + label}
-              className="mt-2 block h-7 w-20 animate-pulse rounded bg-slate-100 motion-reduce:animate-none"
+              className="mt-2 block h-7 w-20 animate-pulse rounded bg-surface-soft motion-reduce:animate-none"
             />
           ) : (
             value
@@ -44,27 +47,47 @@ export function StatCard({
         </p>
         <p className="mt-2 text-xs text-muted">{detail}</p>
       </div>
-    </div>
+    </Panel>
   );
 }
 export function StatusBadge({ status }: { status: string }) {
-  const color = ["ACTIVE", "AVAILABLE", "COMPLETED", "SUCCESSFUL"].includes(
-    status,
-  )
-    ? "bg-emerald-50 text-emerald-700"
+  const tone: BadgeTone = [
+    "ACTIVE",
+    "AVAILABLE",
+    "COMPLETED",
+    "SUCCESSFUL",
+  ].includes(status)
+    ? "success"
     : ["PENDING", "RESERVED"].includes(status)
-      ? "bg-amber-50 text-amber-700"
+      ? "warning"
       : ["FAILED", "INACTIVE", "DISABLED"].includes(status)
-        ? "bg-rose-50 text-rose-600"
+        ? "danger"
         : status === "SOLD"
-          ? "bg-violet-50 text-violet-700"
-          : "bg-slate-100 text-slate-600";
+          ? "purple"
+          : "neutral";
   return (
-    <span
-      className={`inline-flex rounded-lg px-2.5 py-1 text-xs font-medium ${color}`}
-    >
+    <Badge tone={tone}>
       {status.charAt(0) + status.slice(1).toLowerCase()}
-    </span>
+    </Badge>
+  );
+}
+export function ProviderBadge({ provider }: { provider: string }) {
+  return (
+    <Badge
+      tone={
+        provider === "OPAY"
+          ? "success"
+          : provider === "PAYSTACK"
+            ? "info"
+            : "neutral"
+      }
+    >
+      {provider === "OPAY"
+        ? "OPay"
+        : provider === "PAYSTACK"
+          ? "Paystack"
+          : provider}
+    </Badge>
   );
 }
 export function QueryError({
@@ -77,12 +100,17 @@ export function QueryError({
   return (
     <div
       role="alert"
-      className="rounded-lg bg-rose-50 p-5 text-sm text-rose-700"
+      className="rounded-lg bg-danger-soft p-5 text-sm text-danger-deep"
     >
       <p>{adminError(error)}</p>
-      <button onClick={retry} className="mt-2 font-semibold underline">
+      <Button
+        variant="plain"
+        size="none"
+        onClick={retry}
+        className="mt-2 font-semibold underline"
+      >
         Retry
-      </button>
+      </Button>
     </div>
   );
 }
@@ -92,7 +120,7 @@ export function RowsSkeleton() {
       {[1, 2, 3, 4, 5].map((n) => (
         <div
           key={n}
-          className="h-10 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none"
+          className="h-10 animate-pulse rounded-lg bg-surface-soft motion-reduce:animate-none"
         />
       ))}
       <span className="sr-only">Loading…</span>

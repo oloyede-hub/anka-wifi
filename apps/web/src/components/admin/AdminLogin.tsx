@@ -1,4 +1,6 @@
 "use client";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/FormControls";
 
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -61,10 +63,10 @@ export function AdminLogin() {
   const serverError = errors.root?.server?.message;
   return (
     <section
-      className="w-full max-w-md rounded-2xl border border-line bg-white p-6 shadow-sm md:p-8"
+      className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 shadow-sm md:p-8"
       aria-labelledby="admin-login-title"
     >
-      <span className="mb-5 inline-flex size-12 items-center justify-center rounded-full bg-blue-50 text-brand">
+      <span className="mb-5 inline-flex size-12 items-center justify-center rounded-full bg-info-soft text-brand">
         <Icon name="lock" />
       </span>
       <h1 id="admin-login-title" className="text-2xl font-bold tracking-tight">
@@ -79,14 +81,16 @@ export function AdminLogin() {
             </strong>
             .
           </p>
-          <button
-            className="mt-5 min-h-11 rounded-lg border border-line px-5 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
+          <Button
+            variant="plain"
+            size="none"
+            className="mt-5 min-h-11 rounded-lg border border-line px-5 text-sm font-semibold hover:bg-surface-muted disabled:opacity-60"
             type="button"
             onClick={signOut}
             disabled={logout.isPending}
           >
             {logout.isPending ? "Signing out…" : "Sign Out"}
-          </button>
+          </Button>
         </div>
       ) : (
         <>
@@ -101,8 +105,8 @@ export function AdminLogin() {
               >
                 Email address
               </label>
-              <input
-                className="mb-4 min-h-12 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
+              <Input
+                className="mb-4 min-h-12"
                 id="admin-email"
                 type="email"
                 autoComplete="username"
@@ -115,7 +119,7 @@ export function AdminLogin() {
               />
               {errors.email && (
                 <p
-                  className="-mt-2 mb-4 text-sm text-red-700"
+                  className="-mt-2 mb-4 text-sm text-validation-strong"
                   id="admin-email-error"
                   role="alert"
                 >
@@ -128,8 +132,8 @@ export function AdminLogin() {
               >
                 Password
               </label>
-              <input
-                className="mb-4 min-h-12 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
+              <Input
+                className="mb-4 min-h-12"
                 id="admin-password"
                 type="password"
                 autoComplete="current-password"
@@ -142,26 +146,28 @@ export function AdminLogin() {
               />
               {errors.password && (
                 <p
-                  className="-mt-2 mb-4 text-sm text-red-700"
+                  className="-mt-2 mb-4 text-sm text-validation-strong"
                   id="admin-password-error"
                   role="alert"
                 >
                   {errors.password.message}
                 </p>
               )}
-              <button
-                className="min-h-12 w-full rounded-lg bg-brand px-5 py-3 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-wait disabled:opacity-60"
+              <Button
+                variant="primary"
+                size="md"
+                className="min-h-12 w-full px-5 py-3"
                 type="submit"
               >
                 {isSubmitting ? "Signing in…" : "Sign In"}
-              </button>
+              </Button>
             </fieldset>
           </form>
         </>
       )}
       {serverError && (
         <p
-          className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800"
+          className="mt-4 rounded-lg bg-validation-soft p-3 text-sm text-validation-deep"
           role="alert"
         >
           {serverError}

@@ -1,4 +1,8 @@
 "use client";
+import { Pagination } from "@/components/ui/Pagination";
+import { Button } from "@/components/ui/Button";
+import { Input, Select } from "@/components/ui/FormControls";
+
 import { useState } from "react";
 import { PAGE_SIZE, useOperationList } from "@/lib/admin-operations";
 import {
@@ -7,20 +11,23 @@ import {
   type AdminPurchase,
   type AdminPayment,
 } from "@/lib/schemas/admin-operations";
+import { useDashboardAnalytics } from "@/lib/admin-analytics";
 import { formatNaira } from "@/lib/formatting";
-import { QueryError, RowsSkeleton, StatusBadge } from "./AdminUI";
+import {
+  QueryError,
+  RowsSkeleton,
+  StatusBadge,
+  ProviderBadge,
+} from "./AdminUI";
 import { DistributionCard, MoneyAreaCard } from "./DashboardCharts";
 import { DetailButton } from "./OperationDetails";
 import {
-  buttonClass,
   dateTime,
   EmptyState,
-  inputClass,
   OperationHeading,
-  Pagination,
   StatusTabs,
   TableFrame,
-  UnavailableSummary,
+  DataSummary,
 } from "./OperationsUI";
 function Attempts({ item }: { item: AdminPurchase }) {
   return (
@@ -53,6 +60,7 @@ export function TransactionsManager({
   const [page, setPage] = useState(0);
   const filters: Record<string, string> = { status, [searchField]: search };
   const query = useOperationList(kind, filters, page);
+  const report = useDashboardAnalytics();
   const rows = query.data?.slice(0, PAGE_SIZE) ?? [];
   const heads = purchases
     ? [
@@ -88,10 +96,13 @@ export function TransactionsManager({
             ? "View customer Wi-Fi purchases and their payment status."
             : "Track payment transactions for Wi-Fi purchases."
         }
-        refreshing={query.isFetching}
-        refresh={() => void query.refetch()}
+        refreshing={query.isFetching || report.isFetching}
+        refresh={() => {
+          void query.refetch();
+          void report.refetch();
+        }}
       />
-      <UnavailableSummary title={title} statuses={statuses} />
+      <DataSummary title={title} statuses={statuses} resource={kind} />
       {!purchases && (
         <div className="mb-5 grid gap-4 xl:grid-cols-[1.6fr_1fr]">
           <MoneyAreaCard kind="paymentVolume" />
@@ -110,8 +121,8 @@ export function TransactionsManager({
         >
           <label className="text-xs text-muted">
             Search by
-            <select
-              className={inputClass + " mt-1"}
+            <Select
+              className={" mt-1"}
               aria-label="Search by"
               value={searchField}
               onChange={(e) => {
@@ -131,22 +142,26 @@ export function TransactionsManager({
                   Purchase reference (exact)
                 </option>
               )}
-            </select>
+            </Select>
           </label>
           <label className="text-xs text-muted">
             {searchField === "phone" ? "Phone number" : "Purchase reference"}
-            <input
-              className={inputClass + " mt-1"}
+            <Input
+              className={" mt-1"}
               value={text}
               onChange={(e) => setText(e.target.value)}
               maxLength={searchField === "phone" ? 16 : 128}
               placeholder="Enter an exact value"
             />
           </label>
-          <button className={buttonClass + " self-end"}>Search</button>
-          <button
+          <Button variant="secondary" size="md" className={" self-end"}>
+            Search
+          </Button>
+          <Button
+            variant="secondary"
+            size="md"
             type="button"
-            className={buttonClass + " self-end"}
+            className={" self-end"}
             onClick={() => {
               setStatus("");
               setText("");
@@ -155,7 +170,7 @@ export function TransactionsManager({
             }}
           >
             Clear
-          </button>
+          </Button>
         </form>
         <p className="mb-4 text-xs text-muted">
           {purchases
@@ -174,7 +189,7 @@ export function TransactionsManager({
             <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-left text-xs">
                 <caption className="sr-only">{title} results</caption>
-                <thead className="bg-slate-50 text-muted">
+                <thead className="bg-surface-muted text-muted">
                   <tr>
                     {heads.map((head) => (
                       <th key={head} className="px-3 py-3 font-medium">
@@ -228,7 +243,11 @@ export function TransactionsManager({
                   ) : (
                     <>
                       <p className="text-xs text-muted">
-                        Provider: {row.provider}
+                        Provider: <ProviderBadge provider={row.provider} />
+                      </p>
+                      <p className="break-all text-xs text-muted">
+                        Provider Reference:{" "}
+                        {row.providerReference ?? "Not recorded"}
                       </p>
                       <DetailButton
                         kind="purchases"
@@ -251,6 +270,7 @@ export function TransactionsManager({
         {!query.isError && (
           <div className="mt-4">
             <Pagination
+              maxPage={10000}
               page={page}
               count={rows.length}
               hasNext={(query.data?.length ?? 0) > PAGE_SIZE}
@@ -308,7 +328,12 @@ function PaymentRow({ item }: { item: AdminPayment }) {
           ? formatNaira(item.amount)
           : `${item.currency} ${item.amount}`}
       </td>
-      <td className="px-3 py-4 text-muted">{item.provider}</td>
+      <td className="max-w-48 px-3 py-4 text-muted">
+        <ProviderBadge provider={item.provider} />
+        <p className="mt-2 break-all text-xs">
+          Provider Reference: {item.providerReference ?? "Not recorded"}
+        </p>
+      </td>
       <td className="px-3 py-4">
         <StatusBadge status={item.status} />
       </td>

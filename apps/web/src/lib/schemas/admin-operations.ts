@@ -67,7 +67,8 @@ export const accessCodeListSchema = accessCodeSchema.extend({
 export const paymentAttemptSchema = z.object({
   reference: z.string(),
   status: paymentStatus,
-  provider: z.enum(["PAYSTACK", "FLUTTERWAVE", "MANUAL"]),
+  provider: z.enum(["PAYSTACK", "OPAY", "FLUTTERWAVE", "MANUAL"]),
+  providerReference: z.string().nullable().optional(),
   amount: money,
   currency: z.string(),
   paidAt: z.string().nullable(),

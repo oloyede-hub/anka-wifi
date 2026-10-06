@@ -16,6 +16,12 @@ const { AppModule } =
 const { PrismaService } =
   require('../dist/prisma/prisma.service') as typeof import('../src/prisma/prisma.service');
 
+const { ReportsService } =
+  require('../dist/reports/reports.service') as typeof import('../src/reports/reports.service');
+const reporting = {
+  overview: vi.fn().mockResolvedValue({ totals: { purchases: 0 } }),
+};
+
 const jwtSecret = 'test-only-admin-jwt-secret-'.repeat(3);
 const paystackSecret = 'test-only-provider-secret';
 function signature(raw: string) {
@@ -69,6 +75,8 @@ describe('admin and webhook HTTP security', () => {
   beforeAll(async () => {
     passwordHash = await hashPassword('Strong-test-password!');
     const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(ReportsService)
+      .useValue(reporting)
       .overrideProvider(PrismaService)
       .useValue(prisma)
       .overrideProvider(ConfigService)
@@ -77,6 +85,9 @@ describe('admin and webhook HTTP security', () => {
           ADMIN_JWT_SECRET: jwtSecret,
           PAYSTACK_SECRET_KEY: paystackSecret,
           FRONTEND_URL: 'http://localhost:3000',
+          OPAY_MERCHANT_ID: '123456789',
+          OPAY_PUBLIC_KEY: 'test-public',
+          OPAY_PRIVATE_KEY: 'test-private',
         }),
       )
       .compile();
@@ -103,6 +114,14 @@ describe('admin and webhook HTTP security', () => {
   afterAll(async () => {
     await app.close();
     vi.unstubAllGlobals();
+  });
+  it('returns authenticated reporting without caching', async () => {
+    const result = await request(app.getHttpServer())
+      .get('/admin/reports/overview')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(result.headers['cache-control']).toBe('no-store');
+    expect(result.body).toEqual({ totals: { purchases: 0 } });
   });
   it('accepts a valid login, normalizes email, and never returns hashes', async () => {
     const result = await request(app.getHttpServer())
@@ -150,6 +169,7 @@ describe('admin and webhook HTTP security', () => {
     '/admin/access-codes',
     '/admin/purchases',
     '/admin/payments',
+    '/admin/reports/overview',
   ])(
     'rejects missing/invalid JWT for %s and accepts admin JWT',
     async (path) => {
@@ -300,5 +320,62 @@ describe('admin and webhook HTTP security', () => {
       .set('x-paystack-signature', signature(raw))
       .send(raw)
       .expect(400);
+  });
+
+  function opayNotification(type = 'transaction-status') {
+    const payload = {
+      amount: '10025',
+      currency: 'NGN',
+      reference: 'PAY-unknown',
+      refunded: false,
+      status: 'SUCCESS',
+      timestamp: '2026-10-05T09:00:00Z',
+      token: '1234',
+      transactionId: '1234',
+    };
+    const canonical =
+      '{Amount:"10025",Currency:"NGN",Reference:"PAY-unknown",Refunded:f,Status:"SUCCESS",Timestamp:"2026-10-05T09:00:00Z",Token:"1234",TransactionID:"1234"}';
+    return {
+      type,
+      payload,
+      sha512: createHmac('sha3-512', 'test-private')
+        .update(canonical)
+        .digest('hex'),
+    };
+  }
+  it('authenticates OPay callbacks without JWT and safely acknowledges unknown references', async () => {
+    const raw = JSON.stringify(opayNotification(), null, 2);
+    await request(app.getHttpServer())
+      .post('/payments/opay/webhook')
+      .set('Content-Type', 'application/json')
+      .send(raw)
+      .expect(200, { received: true });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+  it('rejects an invalid OPay signature and malformed payload', async () => {
+    await request(app.getHttpServer())
+      .post('/payments/opay/webhook')
+      .send({ ...opayNotification(), sha512: 'a'.repeat(128) })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/payments/opay/webhook')
+      .send({})
+      .expect(400);
+  });
+  it('acknowledges an authenticated unsupported OPay event', async () => {
+    await request(app.getHttpServer())
+      .post('/payments/opay/webhook')
+      .send(opayNotification('unsupported'))
+      .expect(200, { received: true });
+  });
+  it('returns a retryable OPay callback error on a temporary database failure', async () => {
+    prisma.payment.findUnique.mockRejectedValueOnce(
+      new Error('private database error'),
+    );
+    const response = await request(app.getHttpServer())
+      .post('/payments/opay/webhook')
+      .send(opayNotification())
+      .expect(503);
+    expect(JSON.stringify(response.body)).not.toContain('private');
   });
 });

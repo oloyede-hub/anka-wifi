@@ -1,9 +1,17 @@
 "use client";
+import { Sheet } from "@/components/ui/Sheet";
+import { Button } from "@/components/ui/Button";
+
 import { useState } from "react";
 import { usePayment, usePurchase } from "@/lib/admin-operations";
 import { formatNaira } from "@/lib/formatting";
-import { QueryError, RowsSkeleton, StatusBadge } from "./AdminUI";
-import { CopyCode, DataPanel, dateTime, Field, Sheet } from "./OperationsUI";
+import {
+  QueryError,
+  RowsSkeleton,
+  StatusBadge,
+  ProviderBadge,
+} from "./AdminUI";
+import { CopyCode, DataPanel, dateTime, Field } from "./OperationsUI";
 import type { AdminPurchase } from "@/lib/schemas/admin-operations";
 export function PurchaseRelationships({
   purchase,
@@ -65,7 +73,13 @@ function PurchaseDetails({ reference }: { reference: string }) {
                       ? formatNaira(attempt.amount)
                       : `${attempt.currency} ${attempt.amount}`}
                   </Field>
-                  <Field label="Provider">{attempt.provider}</Field>
+                  <Field label="Provider">
+                    <ProviderBadge provider={attempt.provider} />
+                  </Field>
+                  <Field label="Provider Reference">
+                    {attempt.providerReference ?? "Not recorded"}
+                  </Field>
+                  <Field label="Currency">{attempt.currency}</Field>
                   <Field label="Created At">
                     {dateTime(attempt.createdAt)}
                   </Field>
@@ -110,7 +124,13 @@ function PaymentDetails({ reference }: { reference: string }) {
               ? formatNaira(item.amount)
               : `${item.currency} ${item.amount}`}
           </Field>
-          <Field label="Provider">{item.provider}</Field>
+          <Field label="Provider">
+            <ProviderBadge provider={item.provider} />
+          </Field>
+          <Field label="Provider Reference">
+            {item.providerReference ?? "Not recorded"}
+          </Field>
+          <Field label="Currency">{item.currency}</Field>
           <Field label="Created At">{dateTime(item.createdAt)}</Field>
           <Field label="Paid At">{dateTime(item.paidAt)}</Field>
         </div>
@@ -134,9 +154,6 @@ function PaymentDetails({ reference }: { reference: string }) {
       ) : (
         <PurchaseRelationships purchase={purchase.data} />
       )}
-      <p className="text-xs text-muted">
-        Provider transaction IDs and dashboard URLs are not returned by the API.
-      </p>
     </>
   );
 }
@@ -155,7 +172,9 @@ export function DetailButton({
       title={kind === "purchases" ? "Purchase Details" : "Payment Details"}
       onClose={() => setSelected("")}
       trigger={(open) => (
-        <button
+        <Button
+          variant="plain"
+          size="none"
           className="break-all text-left font-medium text-brand underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand"
           onClick={() => {
             setSelected(reference);
@@ -163,7 +182,7 @@ export function DetailButton({
           }}
         >
           {label ?? reference}
-        </button>
+        </Button>
       )}
     >
       {kind === "purchases" ? (

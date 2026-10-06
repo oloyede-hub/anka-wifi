@@ -22,6 +22,8 @@ const { AccessCodesService } =
   require('../dist/access-codes/access-codes.service') as typeof import('../src/access-codes/access-codes.service');
 const { PaymentsService } =
   require('../dist/payments/payments.service') as typeof import('../src/payments/payments.service');
+const { OpayService } =
+  require('../dist/payments/opay/opay.service') as typeof import('../src/payments/opay/opay.service');
 
 // Opt in explicitly: this creates/removes only a randomly named isolated test schema.
 describe.skipIf(process.env.RUN_PAYMENT_DB_TESTS !== '1')(
@@ -32,6 +34,21 @@ describe.skipIf(process.env.RUN_PAYMENT_DB_TESTS !== '1')(
     let prisma: PrismaClientType;
     let schemaCreated = false;
     let codeSequence = 10000000;
+    const providerIds = new Map<string, number>();
+    function providerId(reference: string) {
+      if (!providerIds.has(reference))
+        providerIds.set(reference, providerIds.size + 1);
+      return providerIds.get(reference)!;
+    }
+    const orderNo = (reference: string) => `OPAY-${reference}`;
+    const opayStatus = new Map<string, string>();
+    const opayConfig = {
+      OPAY_MERCHANT_ID: '123456789',
+      OPAY_PUBLIC_KEY: 'test-public',
+      OPAY_PRIVATE_KEY: 'test-private',
+      API_URL: 'https://api.example.com',
+      FRONTEND_URL: 'http://localhost:3000',
+    };
     const initializeTransaction = vi.fn(
       async (input: InitializePaystackTransaction) => ({
         status: true,
@@ -47,7 +64,7 @@ describe.skipIf(process.env.RUN_PAYMENT_DB_TESTS !== '1')(
       status: true,
       message: '',
       data: {
-        id: 1,
+        id: providerId(reference),
         reference,
         amount: 10025,
         status: 'success',
@@ -59,6 +76,28 @@ describe.skipIf(process.env.RUN_PAYMENT_DB_TESTS !== '1')(
     let service: InstanceType<typeof PaymentsService>;
 
     beforeAll(async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, options: { body: string }) => {
+          const { reference } = JSON.parse(options.body) as {
+            reference: string;
+          };
+          return new Response(
+            JSON.stringify({
+              code: '00000',
+              data: {
+                reference,
+                orderNo: orderNo(reference),
+                amount: { total: 10025, currency: 'NGN' },
+                status: url.endsWith('/create')
+                  ? 'INITIAL'
+                  : (opayStatus.get(reference) ?? 'SUCCESS'),
+                cashierUrl: 'https://sandboxcashier.opaycheckout.com/checkout',
+              },
+            }),
+          );
+        }),
+      );
       if (!/^anka_review_[a-f0-9]{16}$/.test(schema))
         throw new Error('Invalid isolated schema');
       admin = new Client({
@@ -105,11 +144,13 @@ describe.skipIf(process.env.RUN_PAYMENT_DB_TESTS !== '1')(
           initializeTransaction,
           verifyTransaction,
         } as unknown as PaystackService,
-        new ConfigService({ FRONTEND_URL: 'http://localhost:3000' }),
+        new ConfigService(opayConfig),
+        new OpayService(new ConfigService(opayConfig)),
       );
     }, 30000);
 
     afterAll(async () => {
+      vi.unstubAllGlobals();
       if (prisma) await prisma.$disconnect();
       if (admin) {
         // Remove only the schema this test created; existing schemas/data are never touched.
@@ -146,6 +187,196 @@ describe.skipIf(process.env.RUN_PAYMENT_DB_TESTS !== '1')(
       }
       return { wifiPackage, code, references };
     }
+
+    function opayCallback(reference: string) {
+      const payload = {
+        amount: '10025',
+        currency: 'NGN',
+        reference,
+        refunded: false,
+        status: 'SUCCESS',
+        timestamp: '2026-10-05T09:00:00Z',
+        token: orderNo(reference),
+        transactionId: orderNo(reference),
+      };
+      const canonical = `{Amount:"${payload.amount}",Currency:"${payload.currency}",Reference:"${reference}",Refunded:f,Status:"SUCCESS",Timestamp:"${payload.timestamp}",Token:"${payload.token}",TransactionID:"${payload.transactionId}"}`;
+      return Buffer.from(
+        JSON.stringify({
+          type: 'transaction-status',
+          payload,
+          sha512: createHmac('sha3-512', opayConfig.OPAY_PRIVATE_KEY)
+            .update(canonical)
+            .digest('hex'),
+        }),
+      );
+    }
+
+    it('prevents Paystack and OPay from reserving two codes for the same purchase', async () => {
+      const { wifiPackage, references } = await fixture();
+      await prisma.accessCode.create({
+        data: { packageId: wifiPackage.id, code: String(codeSequence++) },
+      });
+      const outcomes = await Promise.allSettled([
+        service.initialize(references[0], 'PAYSTACK'),
+        service.initialize(references[0], 'OPAY'),
+      ]);
+      expect(
+        outcomes.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(1);
+      const stored = await prisma.purchase.findUniqueOrThrow({
+        where: { reference: references[0] },
+        include: { payment: true },
+      });
+      expect(stored.payment).toHaveLength(1);
+      expect(
+        await prisma.accessCode.count({
+          where: { packageId: wifiPackage.id, status: 'RESERVED' },
+        }),
+      ).toBe(1);
+      expect(
+        await prisma.accessCode.count({
+          where: { packageId: wifiPackage.id, status: 'AVAILABLE' },
+        }),
+      ).toBe(1);
+    });
+
+    it('fulfills OPay callback and browser verification concurrently exactly once, including duplicates', async () => {
+      const { code, references } = await fixture();
+      const initialized = await service.initialize(references[0], 'OPAY');
+      const raw = opayCallback(initialized.paymentReference);
+      await Promise.all([
+        service.handleOpayWebhook(raw),
+        service.verify(initialized.paymentReference),
+        service.handleOpayWebhook(raw),
+      ]);
+      const stored = await prisma.payment.findUniqueOrThrow({
+        where: { reference: initialized.paymentReference },
+        include: { purchase: { include: { accessCode: true } } },
+      });
+      expect(stored).toMatchObject({
+        provider: 'OPAY',
+        status: 'SUCCESSFUL',
+        providerReference: orderNo(initialized.paymentReference),
+      });
+      expect(stored.purchase).toMatchObject({
+        status: 'COMPLETED',
+        accessCodeId: code.id,
+      });
+      expect(stored.purchase.accessCode?.status).toBe('SOLD');
+      const soldAt = stored.purchase.accessCode?.soldAt;
+      await service.handleOpayWebhook(raw);
+      expect(
+        (await prisma.accessCode.findUniqueOrThrow({ where: { id: code.id } }))
+          .soldAt,
+      ).toEqual(soldAt);
+      expect(
+        await prisma.payment.count({
+          where: { purchaseId: stored.purchaseId, status: 'SUCCESSFUL' },
+        }),
+      ).toBe(1);
+    });
+
+    it('reconciles OPay FAIL before permitting a fresh Paystack attempt', async () => {
+      const { code, references } = await fixture();
+      const initialized = await service.initialize(references[0], 'OPAY');
+      opayStatus.set(initialized.paymentReference, 'FAIL');
+      await prisma.payment.update({
+        where: { reference: initialized.paymentReference },
+        data: { createdAt: new Date(Date.now() - 3600000) },
+      });
+      expect((await service.reconcilePending(5)).outcomes[0].outcome).toBe(
+        'released',
+      );
+      expect(
+        (await prisma.accessCode.findUniqueOrThrow({ where: { id: code.id } }))
+          .status,
+      ).toBe('AVAILABLE');
+      const retry = await service.initialize(references[0], 'PAYSTACK');
+      expect(retry.paymentReference).not.toBe(initialized.paymentReference);
+      await service.verify(retry.paymentReference);
+      expect(
+        (
+          await prisma.purchase.findUniqueOrThrow({
+            where: { reference: references[0] },
+            include: { payment: true },
+          })
+        ).payment,
+      ).toHaveLength(2);
+    });
+
+    it('recovers a lost OPay create response without releasing inventory or starting Paystack', async () => {
+      const { code, references } = await fixture();
+      vi.mocked(fetch).mockRejectedValueOnce(
+        new Error('Lost response after provider acceptance'),
+      );
+      let reference = '';
+      try {
+        await service.initialize(references[0], 'OPAY');
+      } catch (error) {
+        reference = (error as { response: { paymentReference: string } })
+          .response.paymentReference;
+      }
+      expect(reference).toMatch(/^PAY-/);
+      const pending = await prisma.payment.findUniqueOrThrow({
+        where: { reference },
+      });
+      expect(pending).toMatchObject({
+        provider: 'OPAY',
+        status: 'PENDING',
+        providerReference: null,
+      });
+      expect(
+        (await prisma.accessCode.findUniqueOrThrow({ where: { id: code.id } }))
+          .status,
+      ).toBe('RESERVED');
+      await expect(
+        service.initialize(references[0], 'PAYSTACK'),
+      ).rejects.toThrow('unresolved');
+      await service.verify(reference);
+      expect(
+        (await prisma.payment.findUniqueOrThrow({ where: { reference } }))
+          .providerReference,
+      ).toBe(orderNo(reference));
+      expect(
+        (await prisma.accessCode.findUniqueOrThrow({ where: { id: code.id } }))
+          .status,
+      ).toBe('SOLD');
+    });
+
+    it('rolls back OPay fulfillment on a database write failure', async () => {
+      const { code, references } = await fixture();
+      const initialized = await service.initialize(references[0], 'OPAY');
+      await admin.query(
+        `CREATE FUNCTION reject_opay_success() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status = 'SUCCESSFUL' THEN RAISE EXCEPTION 'forced test rollback'; END IF; RETURN NEW; END $$`,
+      );
+      await admin.query(
+        `CREATE TRIGGER reject_opay_success BEFORE UPDATE ON "Payment" FOR EACH ROW EXECUTE FUNCTION reject_opay_success()`,
+      );
+      try {
+        await expect(
+          service.handleOpayWebhook(opayCallback(initialized.paymentReference)),
+        ).rejects.toThrow('temporarily unavailable');
+        const unchanged = await prisma.payment.findUniqueOrThrow({
+          where: { reference: initialized.paymentReference },
+          include: { purchase: { include: { accessCode: true } } },
+        });
+        expect(unchanged.status).toBe('PENDING');
+        expect(unchanged.purchase.status).toBe('PENDING');
+        expect(unchanged.purchase.accessCodeId).toBe(code.id);
+        expect(unchanged.purchase.accessCode?.status).toBe('RESERVED');
+        expect(unchanged.purchase.accessCode?.soldAt).toBeNull();
+      } finally {
+        await admin.query(`DROP TRIGGER reject_opay_success ON "Payment"`);
+        await admin.query(`DROP FUNCTION reject_opay_success()`);
+      }
+      await service.handleOpayWebhook(
+        opayCallback(initialized.paymentReference),
+      );
+      expect(
+        (await prisma.accessCode.findUniqueOrThrow({ where: { id: code.id } }))
+          .status,
+      ).toBe('SOLD');
+    });
 
     it('allows only one customer to initialize against a single code', async () => {
       const { code, references } = await fixture(2);
@@ -308,7 +539,9 @@ describe.skipIf(process.env.RUN_PAYMENT_DB_TESTS !== '1')(
       await prisma.payment.create({
         data: {
           reference: `PAY-${randomBytes(16).toString('hex')}`,
-          providerReference: initialized.paymentReference,
+          providerReference: String(
+            (await verifyTransaction(initialized.paymentReference)).data.id,
+          ),
           provider: 'PAYSTACK',
           amount: '100.25',
           status: 'FAILED',

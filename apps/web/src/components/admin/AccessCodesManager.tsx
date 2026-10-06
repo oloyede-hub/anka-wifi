@@ -1,21 +1,23 @@
 "use client";
+import { Sheet } from "@/components/ui/Sheet";
+import { Pagination } from "@/components/ui/Pagination";
+import { Button } from "@/components/ui/Button";
+import { Input, Select } from "@/components/ui/FormControls";
+
+import { useDashboardAnalytics } from "@/lib/admin-analytics";
 import { useState } from "react";
 import { useAccessCodes, useDisableCode } from "@/lib/admin-operations";
 import { adminError, useAdminPackages } from "@/lib/admin-management";
 import { codeStatus, type AccessCode } from "@/lib/schemas/admin-operations";
-import { QueryError, RowsSkeleton, StatCard, StatusBadge } from "./AdminUI";
+import { QueryError, RowsSkeleton, StatusBadge } from "./AdminUI";
 import { AccessCodeForm } from "./AccessCodeForm";
 import {
   CopyCode,
+  DataSummary,
   dateTime,
   EmptyState,
-  inputClass,
   OperationHeading,
-  Pagination,
-  primaryClass,
-  Sheet,
   TableFrame,
-  buttonClass,
 } from "./OperationsUI";
 export function AccessCodesManager() {
   const [status, setStatus] = useState("");
@@ -23,7 +25,7 @@ export function AccessCodesManager() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const query = useAccessCodes({ status, packageId });
-  const totals = useAccessCodes({ status: "", packageId: "" });
+  const totals = useDashboardAnalytics();
   const packages = useAdminPackages();
   const disable = useDisableCode();
   const filtered =
@@ -42,15 +44,17 @@ export function AccessCodesManager() {
         title="Disable code"
         trigger={(open) =>
           eligible ? (
-            <button
-              className="text-xs font-medium text-rose-700 underline"
+            <Button
+              variant="plain"
+              size="none"
+              className="text-xs font-medium text-danger-deep underline"
               onClick={() => {
                 disable.reset();
                 open();
               }}
             >
               Disable
-            </button>
+            </Button>
           ) : (
             <span className="text-xs text-muted">No actions</span>
           )
@@ -60,20 +64,22 @@ export function AccessCodesManager() {
           Disable {item.code}? It will no longer be available for purchase. The
           server checks that it is unused.
         </p>
-        <button
-          className={buttonClass}
+        <Button
+          variant="secondary"
+          size="md"
+
           disabled={disable.isPending || disable.isSuccess}
           onClick={() => disable.mutate(item.id)}
         >
           {disable.isPending ? "Disabling..." : "Confirm disable"}
-        </button>
+        </Button>
         {disable.isError && (
-          <p role="alert" className="text-sm text-rose-700">
+          <p role="alert" className="text-sm text-danger-deep">
             {adminError(disable.error)}
           </p>
         )}
         {disable.isSuccess && (
-          <p role="status" className="text-sm text-emerald-700">
+          <p role="status" className="text-sm text-success-strong">
             Code disabled.
           </p>
         )}
@@ -94,9 +100,9 @@ export function AccessCodesManager() {
         <Sheet
           title="Add access code"
           trigger={(open) => (
-            <button className={buttonClass} onClick={open}>
+            <Button variant="secondary" size="md" onClick={open}>
               Add code
-            </button>
+            </Button>
           )}
         >
           <AccessCodeForm bulk={false} />
@@ -104,57 +110,22 @@ export function AccessCodesManager() {
         <Sheet
           title="Bulk add access codes"
           trigger={(open) => (
-            <button className={primaryClass} onClick={open}>
+            <Button variant="primary" size="md" onClick={open}>
               Bulk add codes
-            </button>
+            </Button>
           )}
         >
           <AccessCodeForm bulk />
         </Sheet>
       </OperationHeading>
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {["", ...codeStatus.options].map((value, index) => (
-          <StatCard
-            key={value}
-            label={
-              value
-                ? value.charAt(0) + value.slice(1).toLowerCase()
-                : "Total Codes"
-            }
-            value={
-              totals.data
-                ? value
-                  ? totals.data.filter((item) => item.status === value).length
-                  : totals.data.length
-                : "—"
-            }
-            detail={
-              totals.isPending
-                ? "Loading inventory"
-                : totals.isError
-                  ? "Totals unavailable"
-                  : "Complete inventory"
-            }
-            icon={index === 0 ? "package" : "codes"}
-            tone={
-              value === "AVAILABLE"
-                ? "green"
-                : value === "RESERVED"
-                  ? "amber"
-                  : value === "SOLD"
-                    ? "purple"
-                    : "blue"
-            }
-          />
-        ))}
-      </div>
+      <DataSummary title="Codes" statuses={codeStatus.options} resource="accessCodes" />
       <TableFrame>
         <h2 className="mb-4 text-lg font-bold">Access Codes</h2>
         <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_auto]">
           <label className="text-xs text-muted">
             Search code
-            <input
-              className={inputClass + " mt-1"}
+            <Input
+              className={" mt-1"}
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -166,8 +137,8 @@ export function AccessCodesManager() {
           </label>
           <label className="text-xs text-muted">
             Status
-            <select
-              className={inputClass + " mt-1"}
+            <Select
+              className={" mt-1"}
               aria-label="Status"
               value={status}
               onChange={(e) => {
@@ -179,12 +150,12 @@ export function AccessCodesManager() {
               {codeStatus.options.map((value) => (
                 <option key={value}>{value}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="text-xs text-muted">
             Package
-            <select
-              className={inputClass + " mt-1"}
+            <Select
+              className={" mt-1"}
               aria-label="Package"
               value={packageId}
               onChange={(e) => {
@@ -198,10 +169,12 @@ export function AccessCodesManager() {
                   {item.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
-          <button
-            className={buttonClass + " self-end"}
+          <Button
+            variant="secondary"
+            size="md"
+            className={" self-end"}
             onClick={() => {
               setStatus("");
               setPackageId("");
@@ -210,7 +183,7 @@ export function AccessCodesManager() {
             }}
           >
             Clear
-          </button>
+          </Button>
         </div>
         {packages.isError && (
           <QueryError
@@ -237,7 +210,7 @@ export function AccessCodesManager() {
           <>
             <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-muted">
+                <thead className="bg-surface-muted text-muted">
                   <tr>
                     {[
                       "Code",

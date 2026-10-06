@@ -83,6 +83,7 @@ export function useSavePackage() {
         client.invalidateQueries({ queryKey: ["admin", "packages"] }),
         client.invalidateQueries({ queryKey: ["packages"] }),
         client.invalidateQueries({ queryKey: ["admin", "dashboard"] }),
+        client.invalidateQueries({ queryKey: ["admin", "reports"] }),
       ]);
     },
   });

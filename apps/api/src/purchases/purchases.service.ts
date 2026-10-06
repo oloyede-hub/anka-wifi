@@ -162,6 +162,7 @@ const adminPurchaseSelect = {
       reference: true,
       status: true,
       provider: true,
+      providerReference: true,
       amount: true,
       currency: true,
       paidAt: true,

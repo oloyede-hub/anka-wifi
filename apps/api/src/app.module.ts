@@ -1,4 +1,5 @@
 import { AdminModule } from './admin/admin.module';
+import { ReportsModule } from './reports/reports.module';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -19,6 +20,7 @@ import { PaymentsModule } from './payments/payments.module';
     }),
     PrismaModule,
     AdminModule,
+    ReportsModule,
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 30 }]),
     PackagesModule,
     AccessCodesModule,

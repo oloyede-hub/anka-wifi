@@ -210,11 +210,21 @@ notification on an already FAILED attempt raises an error and returns retryable
 Never manually release uncertain payments solely because they are old.
 
 HTTP tests use compiled Nest classes for production decorator metadata; build first.
-Paystack HTTP is mocked in tests, so no real transaction is initialized or charged.
+Paystack and OPay HTTP are mocked in tests, so no real transaction is initialized or charged.
 Live tests create a random temporary schema using existing migration SQL and remove
 only that schema, preserving application data. The database role needs CREATE SCHEMA
-privileges. Without the flag the eight live tests are skipped. Unit setup loads
+privileges. Without the flag the thirteen live tests are skipped. Unit setup loads
 reflect-metadata explicitly. The existing type-aware `pnpm lint` checker rejects
 `moduleResolution: "node"`; standard Oxlint and TypeScript checks pass with the
 unchanged CommonJS configuration. No dependency upgrade was needed; JWT/throttler
 were added and mapped-types was removed as requested.
+
+## OPay Checkout
+
+OPay is available alongside Paystack. See [OPAY.md](./OPAY.md) for the implementation report, credentials, official specifications, Windows sandbox scenarios and validation commands.
+
+## Admin reporting
+
+`GET /admin/reports/overview` requires the existing admin bearer authentication and returns a repeatable-read database snapshot with all-time purchase/payment/code/package status counts, completed-purchase revenue, average package price, payment-status distribution and completed sales by package name. Money remains decimal strings.
+
+Sales series use `completedAt`; payment-volume series use successful NGN payments by `paidAt`. Failed/pending/refunded attempts do not contribute to volume. Windows include the current Africa/Lagos day/week/month and cover 30 days, 12 Monday-based weeks and 12 months. Empty buckets are zero-filled. The frontend refreshes the uncached response every minute and after inventory/package mutations. No database migration is required.

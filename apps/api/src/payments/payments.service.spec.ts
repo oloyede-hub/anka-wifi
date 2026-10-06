@@ -3,6 +3,7 @@ import { PaymentsService } from './payments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessCodesService } from '../access-codes/access-codes.service';
 import { PaystackService } from './paystack/paystack.service';
+import { OpayService } from './opay/opay.service';
 import {
   AccessCodeStatus,
   PaymentProvider,
@@ -31,7 +32,7 @@ function setup() {
     accessCode: code,
     completedAt: null as Date | null,
     package: { id: 'pkg', name: 'Daily', status: 'ACTIVE' },
-    customer: { email: 'customer@example.com' },
+    customer: { email: 'customer@example.com', phone: '08012345678' },
   };
   const payment = {
     id: 'payment',
@@ -39,7 +40,8 @@ function setup() {
     status: PaymentStatus.PENDING as PaymentStatus,
     amount: new Prisma.Decimal('100.25'),
     currency: 'NGN',
-    provider: PaymentProvider.PAYSTACK,
+    provider: PaymentProvider.PAYSTACK as PaymentProvider,
+    providerReference: null as string | null,
     purchaseId: purchase.id,
     purchase,
     paidAt: null as Date | null,
@@ -87,12 +89,46 @@ function setup() {
     verifyTransaction: vi.fn().mockResolvedValue({ data: verified }),
     verifyWebhookSignature: vi.fn().mockReturnValue(true),
   };
-  const config = new ConfigService({ FRONTEND_URL: 'http://localhost:3000' });
+  const opayVerified = {
+    provider: PaymentProvider.OPAY,
+    merchantReference: payment.reference,
+    providerReference: 'opay-order-1',
+    amount: 10025,
+    currency: 'NGN',
+    status: 'success',
+    paidAt: null,
+  };
+  const opay = {
+    configuration: vi.fn(),
+    initializeTransaction: vi.fn(async (input) => {
+      payment.reference = input.reference;
+      payment.provider = PaymentProvider.OPAY;
+      opayVerified.merchantReference = input.reference;
+      return {
+        authorizationUrl: 'https://sandboxcashier.opaycheckout.com/checkout',
+        providerReference: 'opay-order-1',
+      };
+    }),
+    queryTransaction: vi.fn().mockResolvedValue(opayVerified),
+    authenticateCallback: vi.fn().mockReturnValue({
+      type: 'transaction-status',
+      payload: {
+        reference: payment.reference,
+        status: 'SUCCESS',
+        refunded: false,
+      },
+    }),
+  };
+  const config = new ConfigService({
+    FRONTEND_URL: 'http://localhost:3000',
+    API_URL: 'https://api.example.com',
+  });
   const service = new PaymentsService(
     prisma as unknown as PrismaService,
     codes as unknown as AccessCodesService,
     paystack as unknown as PaystackService,
     config,
+    opay as unknown as OpayService,
   );
   return {
     service,
@@ -105,10 +141,123 @@ function setup() {
     codes,
     config,
     verified,
+    opay,
+    opayVerified,
   };
 }
 
 describe('PaymentsService', () => {
+  it.each([null, 'PAY-test'])(
+    'stores Paystack transaction ID while accepting legacy merchant reference %s',
+    async (legacyReference) => {
+      const { service, payment } = setup();
+      payment.providerReference = legacyReference;
+      await service.verify(payment.reference);
+      expect(payment.providerReference).toBe('1');
+    },
+  );
+  it('rejects a different stored Paystack transaction ID before fulfillment', async () => {
+    const { service, payment, tx } = setup();
+    payment.providerReference = '999';
+    await expect(service.verify(payment.reference)).rejects.toThrow(
+      'does not match',
+    );
+    expect(tx.accessCode.updateMany).not.toHaveBeenCalled();
+  });
+  it('rejects missing OPay configuration before reserving inventory', async () => {
+    const { service, opay, codes, tx } = setup();
+    opay.configuration.mockImplementation(() => {
+      throw new Error('not configured');
+    });
+    await expect(
+      service.initialize('ANK-test', PaymentProvider.OPAY),
+    ).rejects.toThrow('not configured');
+    expect(codes.reserveAvailableCode).not.toHaveBeenCalled();
+    expect(tx.payment.create).not.toHaveBeenCalled();
+  });
+  it('initializes OPay with trusted amount and stores the actual order number', async () => {
+    const { service, opay, payment, paystack } = setup();
+    const result = await service.initialize('ANK-test', PaymentProvider.OPAY);
+    expect(result).toMatchObject({
+      provider: 'OPAY',
+      authorizationUrl: 'https://sandboxcashier.opaycheckout.com/checkout',
+    });
+    expect(opay.initializeTransaction.mock.calls[0][0]).toMatchObject({
+      amount: 10025,
+      email: 'customer@example.com',
+      phone: '08012345678',
+      callbackUrl: 'https://api.example.com/payments/opay/webhook',
+    });
+    expect(payment.providerReference).toBe('opay-order-1');
+    expect(paystack.initializeTransaction).not.toHaveBeenCalled();
+  });
+  it('keeps an uncertain OPay initialization pending and returns a recovery reference', async () => {
+    const { service, opay, tx, code } = setup();
+    opay.initializeTransaction.mockRejectedValue(new Error('timeout'));
+    await expect(
+      service.initialize('ANK-test', PaymentProvider.OPAY),
+    ).rejects.toMatchObject({
+      response: { paymentReference: expect.stringMatching(/^PAY-/) },
+    });
+    expect(tx.payment.create.mock.calls[0][0].data).toMatchObject({
+      status: 'PENDING',
+      provider: 'OPAY',
+    });
+    expect(code.status).toBe('RESERVED');
+    expect(tx.accessCode.updateMany).not.toHaveBeenCalled();
+  });
+  it.each(['pending', 'failed'])('does not fulfill OPay %s', async (status) => {
+    const { service, payment, opayVerified, tx } = setup();
+    payment.provider = PaymentProvider.OPAY;
+    opayVerified.status = status;
+    await expect(service.verify(payment.reference)).rejects.toThrow(
+      'not been completed',
+    );
+    expect(tx.accessCode.updateMany).not.toHaveBeenCalled();
+  });
+  it.each([
+    'amount',
+    'currency',
+    'merchantReference',
+    'provider',
+    'providerReference',
+  ])('rejects OPay %s mismatch', async (field) => {
+    const { service, payment, opayVerified, tx } = setup();
+    payment.provider = PaymentProvider.OPAY;
+    payment.providerReference = 'opay-order-1';
+    Object.assign(opayVerified, { [field]: field === 'amount' ? 1 : 'WRONG' });
+    await expect(service.verify(payment.reference)).rejects.toThrow(
+      'does not match',
+    );
+    expect(tx.accessCode.updateMany).not.toHaveBeenCalled();
+  });
+  it('fulfills OPay through the shared operation and acknowledges duplicate callbacks', async () => {
+    const { service, payment, tx, opayVerified } = setup();
+    payment.provider = PaymentProvider.OPAY;
+    await service.handleOpayWebhook(Buffer.from('{}'));
+    await service.handleOpayWebhook(Buffer.from('{}'));
+    expect(payment.status).toBe('SUCCESSFUL');
+    expect(payment.providerReference).toBe(opayVerified.providerReference);
+    expect(tx.accessCode.updateMany).toHaveBeenCalledTimes(1);
+  });
+  it('rejects invalid callbacks before querying or reading payments', async () => {
+    const { service, opay, prisma } = setup();
+    opay.authenticateCallback.mockImplementation(() => {
+      throw new Error('invalid signature');
+    });
+    await expect(
+      service.handleOpayWebhook(Buffer.from('{}')),
+    ).rejects.toThrow();
+    expect(prisma.payment.findUnique).not.toHaveBeenCalled();
+    expect(opay.queryTransaction).not.toHaveBeenCalled();
+  });
+  it('acknowledges unknown and wrong-provider OPay callbacks without verification', async () => {
+    const { service, prisma, opay } = setup();
+    await service.handleOpayWebhook(Buffer.from('{}'));
+    prisma.payment.findUnique.mockResolvedValueOnce(null as never);
+    await service.handleOpayWebhook(Buffer.from('{}'));
+    expect(opay.queryTransaction).not.toHaveBeenCalled();
+  });
   describe('bounded reconciliation', () => {
     function recovery() {
       const fixture = setup();

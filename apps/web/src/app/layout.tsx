@@ -24,7 +24,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${montserrat.variable} h-full scroll-smooth scroll-pt-6 antialiased motion-reduce:scroll-auto`}
       suppressHydrationWarning
     >
-      <body className="flex min-h-full flex-col bg-white font-sans text-[15px] leading-relaxed text-navy [&_button]:cursor-pointer **:focus-visible:outline-3 **:focus-visible:outline-offset-4 **:focus-visible:outline-brand">
+      <body className="flex min-h-full flex-col bg-surface font-sans text-[15px] leading-relaxed text-navy [&_button]:cursor-pointer **:focus-visible:outline-3 **:focus-visible:outline-offset-4 **:focus-visible:outline-brand">
         <Providers>{children}</Providers>
       </body>
     </html>

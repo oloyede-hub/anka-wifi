@@ -9,6 +9,8 @@ let mode = "ready";
 let adminMode = "ready";
 let packages = [];
 let mutationFailure = false;
+let paymentMode = "ready";
+let checkoutProvider = "PAYSTACK";
 const backend = http.createServer(async (req, res) => {
   let body = "";
   for await (const chunk of req) body += chunk;
@@ -34,6 +36,55 @@ const backend = http.createServer(async (req, res) => {
           id: "staff-id",
           email: "staff@example.com",
           name: "Anka Staff",
+        }),
+      );
+      return;
+    }
+    if (req.url === "/admin/reports/overview") {
+      const empty = (statuses) => ({
+        total: 0,
+        statuses: Object.fromEntries(statuses.map((status) => [status, 0])),
+      });
+      const series = {
+        daily: [{ label: "06 Oct", amount: "0.00" }],
+        weekly: [{ label: "05 Oct", amount: "0.00" }],
+        monthly: [{ label: "Oct 2026", amount: "0.00" }],
+      };
+      const average = packages.length
+        ? (
+            packages.reduce((sum, p) => sum + Number(p.price), 0) /
+            packages.length
+          ).toFixed(2)
+        : "0.00";
+      res.end(
+        JSON.stringify({
+          asOf: "2026-10-06T12:00:00.000Z",
+          timeZone: "Africa/Lagos",
+          currency: "NGN",
+          totals: {
+            purchases: 0,
+            revenue: "0.00",
+            codesSold: 0,
+            availableCodes: 0,
+          },
+          summaries: {
+            purchases: empty(["PENDING", "COMPLETED", "FAILED", "CANCELLED"]),
+            payments: empty(["PENDING", "SUCCESSFUL", "FAILED", "REFUNDED"]),
+            accessCodes: empty(["AVAILABLE", "RESERVED", "SOLD", "DISABLED"]),
+            packages: {
+              total: packages.length,
+              statuses: {
+                ACTIVE: packages.filter((p) => p.status === "ACTIVE").length,
+                INACTIVE: packages.filter((p) => p.status === "INACTIVE")
+                  .length,
+              },
+              averagePrice: average,
+            },
+          },
+          sales: series,
+          paymentVolume: series,
+          paymentStatus: [],
+          packageSales: [],
         }),
       );
       return;
@@ -88,6 +139,33 @@ const backend = http.createServer(async (req, res) => {
     res.end("{}");
     return;
   }
+  if (req.url === "/payments/initialize") {
+    checkoutProvider = JSON.parse(body).provider ?? "PAYSTACK";
+    if (paymentMode === "unknown-init") {
+      res.writeHead(502);
+      res.end(
+        JSON.stringify({
+          message: "private provider diagnostic",
+          paymentReference: "PAY-random-test",
+          privateKey: "never-forward-this",
+        }),
+      );
+      return;
+    }
+  }
+  if (
+    req.url === "/payments/verify/PAY-random-test" &&
+    ["pending", "failed"].includes(paymentMode)
+  ) {
+    res.writeHead(400);
+    res.end(
+      JSON.stringify({
+        paymentState: paymentMode.toUpperCase(),
+        privateKey: "never-forward-this",
+      }),
+    );
+    return;
+  }
   const results = {
     "/admin/auth/login": {
       accessToken:
@@ -113,10 +191,18 @@ const backend = http.createServer(async (req, res) => {
     "/payments/initialize": {
       purchaseReference: "ANK-random-test",
       paymentReference: "PAY-random-test",
-      authorizationUrl: "https://checkout.paystack.com/test",
+      provider: checkoutProvider,
+      authorizationUrl:
+        checkoutProvider === "OPAY"
+          ? "https://sandboxcashier.opaycheckout.com/test"
+          : "https://checkout.paystack.com/test",
     },
     "/payments/verify/PAY-random-test": {
-      payment: { reference: "PAY-random-test", status: "SUCCESSFUL" },
+      payment: {
+        reference: "PAY-random-test",
+        status: "SUCCESSFUL",
+        provider: checkoutProvider,
+      },
       purchase: {
         reference: "ANK-random-test",
         status: "COMPLETED",
@@ -141,6 +227,7 @@ const frontend = spawn(
     env: {
       ...process.env,
       NEXT_PUBLIC_API_URL: `http://127.0.0.1:${backend.address().port}`,
+      API_URL: `http://127.0.0.1:${backend.address().port}`,
       ...(process.env.ANKA_SMOKE_DEV === "1"
         ? { ANKA_WEB_DIST_DIR: ".next/admin-smoke" }
         : {}),
@@ -222,6 +309,41 @@ try {
   const verified = await call("payments/verify/PAY-random-test");
   assert.equal(verified.headers.get("cache-control"), "no-store");
   assert.equal((await verified.json()).accessCode, "TEST-CODE");
+  const opayCheckout = await (
+    await call("payments/initialize", {
+      purchaseReference: "ANK-random-test",
+      provider: "OPAY",
+    })
+  ).json();
+  assert.equal(opayCheckout.provider, "OPAY");
+  assert.equal(
+    opayCheckout.authorizationUrl,
+    "https://sandboxcashier.opaycheckout.com/test",
+  );
+  assert.deepEqual(JSON.parse(requests.at(-1).body), {
+    purchaseReference: "ANK-random-test",
+    provider: "OPAY",
+  });
+  paymentMode = "unknown-init";
+  const uncertain = await call("payments/initialize", {
+    purchaseReference: "ANK-random-test",
+    provider: "OPAY",
+  });
+  assert.equal(uncertain.status, 502);
+  assert.deepEqual(await uncertain.json(), {
+    message: "Request could not be completed",
+    paymentReference: "PAY-random-test",
+  });
+  for (const state of ["pending", "failed"]) {
+    paymentMode = state;
+    const response = await call("payments/verify/PAY-random-test");
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      message: "Request could not be completed",
+      paymentState: state.toUpperCase(),
+    });
+  }
+  paymentMode = "ready";
   const count = requests.length;
   assert.equal((await call("purchases/ANK-random-test")).status, 404);
   assert.equal((await call("admin")).status, 404);
@@ -350,7 +472,12 @@ try {
   mutationFailure = false;
   if (process.env.ANKA_SMOKE_BROWSER === "1") {
     const { checkAdminBrowser } = await import("./admin-browser-check.mjs");
-    await checkAdminBrowser(base, credentials);
+    await checkAdminBrowser(base, credentials, {
+      setMode: (value) => {
+        paymentMode = value;
+      },
+      requests,
+    });
   }
   console.log(
     "PASS: protected admin pages, authenticated login redirect, live package proxy, create/edit/status changes, validation, origin checks and private response projections.",

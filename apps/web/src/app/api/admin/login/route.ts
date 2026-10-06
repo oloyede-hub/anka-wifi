@@ -15,7 +15,7 @@ function sameOrigin(request: NextRequest) {
 }
 export async function POST(request: NextRequest) {
   if (!sameOrigin(request)) return reply("Request not allowed", 403);
-  const base = process.env.NEXT_PUBLIC_API_URL;
+  const base = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL;
   if (!base) return reply("Login is temporarily unavailable", 503);
   let values;
   try {

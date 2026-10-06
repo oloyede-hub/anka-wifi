@@ -102,7 +102,7 @@ resource request. All admin queries and mutations use TanStack Query; there is n
 useEffect fetching and no Axios, extra state/form library or UI framework.
 
 Query keys are `['admin','packages']`, `['admin','dashboard','recent-purchases']`
-and `['admin','dashboard','analytics']`. The package mutations invalidate admin
+and `['admin','reports','overview']`. The package mutations invalidate admin
 packages/dashboard plus `['packages']` for the customer storefront. The original
 shared QueryClientProvider remains in use.
 
@@ -127,30 +127,11 @@ Naira labels for server monetary strings and an accessible textual alternative.
 Numbers are used only for chart geometry, never to calculate revenue. Chart
 loading skeletons, errors/retry, empty states and mobile sizing are included.
 
-**There is currently no backend reporting or activity endpoint.** The analytics
-query adapter in `lib/admin-analytics.ts` explicitly returns null (unavailable),
-makes no invented API request, and never aggregates paginated records into
-authoritative figures. Therefore all four charts and dashboard summary totals
-remain honest unavailable states; Daily/Weekly/Monthly controls are disabled.
-Recent purchases and package management are live. Recent Activity is an empty
-state. Add Package is functional. Other operational screens are outside this
-dashboard/packages pass and may be developed separately.
+The authenticated `GET /admin/reports/overview` endpoint supplies database-wide totals, status counts and chart series. TanStack Query uses `['admin','reports','overview']`, validates responses with Zod, and refreshes every minute. Code and package mutations invalidate reporting. Summary cards on Dashboard, Purchases, Payments, Access Codes and Packages use this source instead of counting paginated rows.
 
-Before connecting analytics, add an authenticated backend reporting source with:
+Totals are all-time. Revenue counts completed purchase amounts once, regardless of payment retries. Payment volume includes only successful NGN payments by `paidAt`. Sales use `completedAt`. Series cover 30 days, 12 Monday-based weeks, or 12 months including the current period, in Africa/Lagos. Missing activity fills zero buckets; failed requests show retry errors. Status distribution counts all payment attempts, including refunds. Package sales count completed purchases grouped by package name. Recent Activity lists actual recent purchase creation events rather than an audit log.
 
-- Server-calculated purchase count, successful/completed revenue (decimal string),
-  SOLD code count and AVAILABLE code count for a clearly documented period.
-- Sales and successful payment-volume series for daily/weekly/monthly grain:
-  timestamp/label and authoritative decimal-string amounts, with period/timezone
-  semantics defined by the server.
-- Payment counts grouped by real payment status and completed purchase counts
-  grouped by package/type, with explicit date range semantics.
-- An audit/activity source if Recent Activity should become live.
-
-`dashboardAnalyticsSchema` describes the proposed frontend adapter shape; it is
-not an existing backend contract. Replace the null adapter with the authenticated
-fetch and schema validation once the actual endpoint/response is agreed. No
-analytics endpoint, sample metrics or fake chart points were added to production.
+Database reporting tests run against a randomly named isolated schema with `RUN_REPORTING_DB_TESTS=1 pnpm --filter api test:e2e -- reports-postgres.e2e-spec.ts` after the API build. They cover empty datasets, decimal money, payment retries and Lagos calendar boundaries.
 
 ## Admin checks without a production build
 
@@ -181,8 +162,14 @@ invalidation, desktop/mobile overflow, drawer and mobile form. Screenshots are
 saved under `.next/admin-smoke/browser` and are ignored by Git. Without dev mode,
 the smoke script continues to use your existing production build.
 
-Remaining work for this pass: backend analytics/activity sources,
+Remaining work for this pass: a dedicated audit/activity source,
 deployment build verification and a real backend package round
 trip after the API is rebuilt. No real data is written by these smoke tests.
 
 The production smoke test also checks login credential normalization, validation, origin enforcement, token isolation, cookie flags/expiry, invalid credentials, throttling, malformed upstream responses and logout. Browser checks exercise RHF checkout/admin validation, retrying initialization without recreating a purchase, redirects, and uncertain/successful payment verification with Query-managed state.
+
+## OPay checkout
+
+Checkout offers Paystack and OPay. Provider choice is sent to the same backend initialization endpoint; the browser only redirects to the normalized checkout URL and verifies on return. Uncertain attempts retain their recovery reference and prevent starting another attempt in the dialog.
+
+Use server-only `API_URL` in `.env.local` to configure the runtime backend proxy destination; `NEXT_PUBLIC_API_URL` remains a compatibility fallback. OPay merchant keys belong exclusively in the root backend `.env`. See [the OPay implementation report and Windows sandbox guide](../api/OPAY.md).

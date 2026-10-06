@@ -1,4 +1,7 @@
 "use client";
+import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
+
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useRef, useState } from "react";
@@ -44,20 +47,20 @@ export function AdminShell({
   function sidebar(mobile = false) {
     const compact = collapsed && !mobile;
     return (
-      <div className="flex h-full flex-col bg-[#0d1e34] px-3 py-6 text-slate-200">
+      <div className="flex h-full flex-col bg-sidebar px-3 py-6 text-sidebar-text">
         <Link
           href="/admin"
           onClick={() => drawer.current?.close()}
-          className="mb-9 flex items-center gap-3 px-3 text-white"
+          className="mb-9 flex items-center gap-3 px-3 text-on-dark"
           aria-label="Anka WiFi Admin Panel"
         >
-          <Icon className="size-10 shrink-0 text-[#3a7cff]" />
+          <Icon className="size-10 shrink-0 text-sidebar-logo" />
           {!compact && (
             <span>
               <span className="block text-xl font-bold tracking-tight">
                 Anka WiFi
               </span>
-              <span className="text-xs text-slate-300">Admin Panel</span>
+              <span className="text-xs text-sidebar-muted">Admin Panel</span>
             </span>
           )}
         </Link>
@@ -70,7 +73,7 @@ export function AdminShell({
                 onClick={() => drawer.current?.close()}
                 aria-current={pathname === item.href ? "page" : undefined}
                 title={compact ? item.label : undefined}
-                className={`flex min-h-12 items-center gap-4 rounded-lg px-4 text-sm font-medium transition-colors ${pathname === item.href ? "bg-[#2465dc] text-white shadow-sm" : "hover:bg-white/10"}`}
+                className={`flex min-h-12 items-center gap-4 rounded-lg px-4 text-sm font-medium transition-colors ${pathname === item.href ? "bg-sidebar-active text-on-dark shadow-sm" : "hover:bg-surface/10"}`}
               >
                 <AdminIcon name={item.icon} className="shrink-0" />
                 {!compact && item.label}
@@ -80,7 +83,7 @@ export function AdminShell({
                 key={item.label}
                 title={item.label + " — coming soon"}
                 aria-disabled="true"
-                className="flex min-h-12 items-center gap-4 px-4 text-sm text-slate-400"
+                className="flex min-h-12 items-center gap-4 px-4 text-sm text-placeholder"
               >
                 <AdminIcon name={item.icon} className="shrink-0" />
                 {!compact && (
@@ -97,30 +100,34 @@ export function AdminShell({
         </nav>
         <div className="mt-auto pt-12">
           <div className="flex items-center gap-3 overflow-hidden px-3 pb-5">
-            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand font-semibold text-white">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand font-semibold text-on-dark">
               {admin.name.charAt(0).toUpperCase()}
             </span>
             {!compact && (
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-white">
+                <p className="truncate text-sm font-semibold text-on-dark">
                   {admin.name}
                 </p>
-                <p className="truncate text-xs text-slate-300">{admin.email}</p>
+                <p className="truncate text-xs text-sidebar-muted">
+                  {admin.email}
+                </p>
               </div>
             )}
           </div>
-          <div className="border-t border-white/10 pt-3">
-            <button
+          <div className="border-t border-on-dark/10 pt-3">
+            <Button
+              variant="plain"
+              size="none"
               onClick={signOut}
               disabled={logout.isPending}
               aria-label="Logout"
-              className="flex w-full items-center gap-4 rounded-lg px-4 py-3 text-sm hover:bg-white/10 disabled:opacity-50"
+              className="flex w-full items-center gap-4 rounded-lg px-4 py-3 text-sm hover:bg-surface/10 disabled:opacity-50"
             >
               <AdminIcon name="logout" />
               {!compact && (logout.isPending ? "Signing out…" : "Logout")}
-            </button>
+            </Button>
             {logout.isError && (
-              <p role="alert" className="px-3 text-xs text-red-200">
+              <p role="alert" className="px-3 text-xs text-validation-on-dark">
                 Sign out failed. Try again.
               </p>
             )}
@@ -131,10 +138,10 @@ export function AdminShell({
   }
   return (
     <Identity.Provider value={admin}>
-      <div className="min-h-screen bg-[#f5f8fc] text-[#081733]">
+      <div className="min-h-screen bg-surface-admin text-admin-foreground">
         <a
           href="#admin-main"
-          className="sr-only focus:not-sr-only focus:fixed focus:z-50 focus:bg-white focus:p-3"
+          className="sr-only focus:not-sr-only focus:fixed focus:z-50 focus:bg-surface focus:p-3"
         >
           Skip to content
         </a>
@@ -143,47 +150,54 @@ export function AdminShell({
         >
           {sidebar()}
         </aside>
-        <dialog
+        <Dialog
+          placement="left"
           ref={drawer}
-          className="fixed inset-y-0 left-0 m-0 h-dvh max-h-none w-72 max-w-[85vw] border-0 bg-[#0d1e34] p-0 text-white backdrop:bg-slate-950/50"
+
           aria-label="Admin navigation"
         >
           <div className="absolute right-3 top-2">
-            <button
+            <Button
+              variant="plain"
+              size="none"
               aria-label="Close navigation"
               className="p-2 text-xl"
               onClick={() => drawer.current?.close()}
             >
               ×
-            </button>
+            </Button>
           </div>
           {sidebar(true)}
-        </dialog>
+        </Dialog>
         <div className={`min-w-0 ${collapsed ? "lg:pl-20" : "lg:pl-64"}`}>
-          <header className="flex h-16 items-center justify-between border-b border-line bg-white/90 px-5 sm:px-8">
+          <header className="flex h-16 items-center justify-between border-b border-line bg-surface/90 px-5 sm:px-8">
             <div className="flex items-center gap-3">
-              <button
-                className="rounded-lg p-2 hover:bg-slate-100 lg:hidden"
+              <Button
+                variant="plain"
+                size="none"
+                className="rounded-lg p-2 hover:bg-surface-soft lg:hidden"
                 aria-label="Open navigation"
                 onClick={() => drawer.current?.showModal()}
               >
                 <AdminIcon name="menu" />
-              </button>
-              <button
-                className="hidden rounded-lg p-2 hover:bg-slate-100 lg:block"
+              </Button>
+              <Button
+                variant="plain"
+                size="none"
+                className="hidden rounded-lg p-2 hover:bg-surface-soft lg:block"
                 aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                 onClick={() => setCollapsed(!collapsed)}
               >
                 <AdminIcon name="menu" />
-              </button>
+              </Button>
               <span className="text-sm text-muted">
-                Anka WiFi <span className="mx-2 text-slate-300">/</span>{" "}
+                Anka WiFi <span className="mx-2 text-sidebar-muted">/</span>{" "}
                 {navigation.find((item) => item.href === pathname)?.label ??
                   "Overview"}
               </span>
             </div>
             <div className="flex items-center gap-3">
-              <span className="grid size-8 place-items-center rounded-full bg-brand text-sm font-semibold text-white">
+              <span className="grid size-8 place-items-center rounded-full bg-brand text-sm font-semibold text-on-dark">
                 {admin.name.charAt(0).toUpperCase()}
               </span>
               <span className="hidden text-sm font-medium sm:inline">

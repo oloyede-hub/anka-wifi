@@ -1,4 +1,7 @@
 "use client";
+import { Button } from "@/components/ui/Button";
+
+import { chartTheme } from "@/lib/chart-theme";
 import { useId, useState } from "react";
 import {
   Area,
@@ -19,18 +22,11 @@ import {
 import { formatNaira } from "@/lib/formatting";
 import { panelClass, QueryError } from "./AdminUI";
 import { AdminIcon } from "./AdminIcon";
-const colors = [
-  "#246bff",
-  "#21a45d",
-  "#ffaf32",
-  "#8859ef",
-  "#e44f69",
-  "#64748b",
-];
+const colors = chartTheme.palette;
 function ChartEmpty({ text }: { text: string }) {
   return (
     <div className="flex h-64 flex-col items-center justify-center gap-3 px-5 text-center">
-      <span className="grid size-12 place-items-center rounded-full bg-blue-50 text-brand">
+      <span className="grid size-12 place-items-center rounded-full bg-info-soft text-brand">
         <AdminIcon name="chart" />
       </span>
       <p className="max-w-xs text-sm text-muted">{text}</p>
@@ -40,7 +36,7 @@ function ChartEmpty({ text }: { text: string }) {
 function ChartSkeleton() {
   return (
     <div
-      className="mt-5 h-64 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none"
+      className="mt-5 h-64 animate-pulse rounded-lg bg-surface-soft motion-reduce:animate-none"
       role="status"
       aria-label="Loading chart"
     >
@@ -68,18 +64,30 @@ export function MoneyAreaCard({ kind }: { kind: "sales" | "paymentVolume" }) {
           aria-label={title + " period"}
         >
           {(["daily", "weekly", "monthly"] as const).map((value) => (
-            <button
+            <Button
+              variant="plain"
+              size="none"
               key={value}
               disabled={!query.data}
               aria-pressed={period === value}
               onClick={() => setPeriod(value)}
-              className={`rounded-md px-3 py-1.5 text-xs transition-colors disabled:opacity-45 ${period === value && query.data ? "bg-brand text-white" : "text-muted"}`}
+              className={`rounded-md px-3 py-1.5 text-xs transition-colors disabled:opacity-45 ${period === value && query.data ? "bg-brand text-on-dark" : "text-muted"}`}
             >
               {value.charAt(0).toUpperCase() + value.slice(1)}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {period === "daily"
+          ? "Last 30 days"
+          : period === "weekly"
+            ? "Last 12 weeks"
+            : "Last 12 months"}
+        {" • "}
+        {kind === "sales" ? "Completed purchases" : "Successful NGN payments"}
+      </p>
+
       {query.isPending ? (
         <ChartSkeleton />
       ) : query.isError ? (
@@ -109,27 +117,31 @@ export function MoneyAreaCard({ kind }: { kind: "sales" | "paymentVolume" }) {
               >
                 <defs>
                   <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#246bff" stopOpacity={0.22} />
+                    <stop
+                      offset="0%"
+                      stopColor={chartTheme.primary}
+                      stopOpacity={0.22}
+                    />
                     <stop
                       offset="100%"
-                      stopColor="#246bff"
+                      stopColor={chartTheme.primary}
                       stopOpacity={0.015}
                     />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="#e8eef7" vertical={false} />
+                <CartesianGrid stroke={chartTheme.grid} vertical={false} />
                 <XAxis
                   dataKey="label"
                   tickLine={false}
                   axisLine={false}
-                  tick={{ fill: "#61718f", fontSize: 11 }}
+                  tick={chartTheme.tick}
                   minTickGap={24}
                 />
                 <YAxis
                   width={64}
                   tickLine={false}
                   axisLine={false}
-                  tick={{ fill: "#61718f", fontSize: 11 }}
+                  tick={chartTheme.tick}
                   tickFormatter={(value) =>
                     new Intl.NumberFormat("en-NG", {
                       style: "currency",
@@ -146,19 +158,15 @@ export function MoneyAreaCard({ kind }: { kind: "sales" | "paymentVolume" }) {
                       ? "Completed revenue"
                       : "Successful payment volume",
                   ]}
-                  contentStyle={{
-                    borderRadius: 10,
-                    borderColor: "#e7edf5",
-                    fontSize: 12,
-                  }}
+                  contentStyle={chartTheme.tooltip}
                 />
                 <Area
                   type="monotone"
                   dataKey="plottedAmount"
-                  stroke="#246bff"
+                  stroke={chartTheme.primary}
                   strokeWidth={2.5}
                   fill={`url(#${gradientId})`}
-                  dot={{ r: 3, fill: "#246bff" }}
+                  dot={{ r: 3, fill: chartTheme.primary }}
                   isAnimationActive={false}
                 />
               </AreaChart>
@@ -237,11 +245,7 @@ export function DistributionCard({
                       ? "Payments"
                       : "Completed purchases",
                   ]}
-                  contentStyle={{
-                    borderRadius: 10,
-                    borderColor: "#e7edf5",
-                    fontSize: 12,
-                  }}
+                  contentStyle={chartTheme.tooltip}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -254,7 +258,15 @@ export function DistributionCard({
                   style={{ backgroundColor: colors[index % colors.length] }}
                 />
                 <span className="flex-1 text-muted">{item.label}</span>
-                <strong>{item.count.toLocaleString("en-NG")}</strong>
+                <strong>
+                  {item.count.toLocaleString("en-NG")} (
+                  {Math.round(
+                    (item.count /
+                      data.reduce((sum, entry) => sum + entry.count, 0)) *
+                      100,
+                  )}
+                  %)
+                </strong>
               </li>
             ))}
           </ul>

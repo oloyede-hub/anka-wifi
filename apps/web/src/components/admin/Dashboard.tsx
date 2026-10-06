@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { Button } from "@/components/ui/Button";
 import { useAdminIdentity } from "./AdminShell";
 import {
   StatCard,
@@ -14,16 +15,6 @@ import { formatNaira } from "@/lib/formatting";
 import { AdminIcon } from "./AdminIcon";
 import { MoneyAreaCard, DistributionCard } from "./DashboardCharts";
 import { useDashboardAnalytics } from "@/lib/admin-analytics";
-function ReportingEmpty({ text }: { text: string }) {
-  return (
-    <div className="flex min-h-44 flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted">
-      <span className="grid size-12 place-items-center rounded-full bg-blue-50 text-brand">
-        <AdminIcon name="chart" />
-      </span>
-      <p className="max-w-xs">{text}</p>
-    </div>
-  );
-}
 export function Dashboard() {
   const admin = useAdminIdentity();
   const purchases = useRecentPurchases();
@@ -39,9 +30,16 @@ export function Dashboard() {
             Here’s what’s happening with your Wi-Fi business.
           </p>
         </div>
-        <span className="rounded-lg border border-line bg-white px-4 py-2 text-sm text-muted">
-          Business overview
-        </span>
+        <Button
+          variant="primary"
+          disabled={analytics.isFetching || purchases.isFetching}
+          onClick={() => {
+            void analytics.refetch();
+            void purchases.refetch();
+          }}
+        >
+          Refresh
+        </Button>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
         {[
@@ -83,12 +81,20 @@ export function Dashboard() {
             }
             detail={
               analytics.data
-                ? "Reported business totals"
-                : "Awaiting reporting data"
+                ? "All-time business totals"
+                : analytics.isError
+                  ? "Could not load totals"
+                  : "Loading business totals"
             }
           />
         ))}
       </div>
+      {analytics.isError && (
+        <QueryError
+          error={analytics.error}
+          retry={() => void analytics.refetch()}
+        />
+      )}
       <div className="grid items-start gap-5 xl:grid-cols-[1.75fr_1fr]">
         <div className="min-w-0 space-y-5">
           <MoneyAreaCard kind="sales" />
@@ -110,7 +116,7 @@ export function Dashboard() {
               <>
                 <div className="hidden overflow-x-auto px-5 pb-5 md:block">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-muted">
+                    <thead className="bg-surface-muted text-muted">
                       <tr>
                         {[
                           "Reference",
@@ -181,15 +187,38 @@ export function Dashboard() {
           <DistributionCard kind="paymentStatus" />
           <section className={panelClass + " p-5"}>
             <h2 className="text-lg font-bold">Recent Activity</h2>
-            <ReportingEmpty text="Your business activity feed is not available yet." />
+            {purchases.isPending ? (
+              <RowsSkeleton />
+            ) : purchases.isError ? (
+              <QueryError
+                error={purchases.error}
+                retry={() => void purchases.refetch()}
+              />
+            ) : !purchases.data.length ? (
+              <p className="mt-4 text-sm text-muted">No purchases yet.</p>
+            ) : (
+              <ul className="mt-4 divide-y divide-line">
+                {purchases.data.slice(0, 5).map((p) => (
+                  <li key={p.reference} className="space-y-2 py-3 text-xs">
+                    <p className="font-medium">
+                      Purchase created: {p.package.name}
+                    </p>
+                    <p className="break-all text-muted">
+                      {p.reference} ? {dateLabel(p.createdAt)}
+                    </p>
+                    <StatusBadge status={p.status} />
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
-          <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-5">
+          <section className="rounded-xl border border-info-decoration bg-info-soft/70 p-5">
             <h2 className="mb-4 text-lg font-bold">Quick Actions</h2>
             <Link
               href="/admin/packages?create=1"
-              className="flex items-center gap-3 rounded-lg border border-blue-100 bg-white p-3 text-brand hover:border-brand"
+              className="flex items-center gap-3 rounded-lg border border-info-decoration bg-surface p-3 text-brand hover:border-brand"
             >
-              <span className="grid size-10 place-items-center rounded-lg bg-blue-50">
+              <span className="grid size-10 place-items-center rounded-lg bg-info-soft">
                 <AdminIcon name="package" />
               </span>
               <span>
@@ -201,7 +230,19 @@ export function Dashboard() {
               <AdminIcon name="plus" className="ml-auto size-5" />
             </Link>
             <p className="mt-3 text-xs text-muted">
-              Code uploads and purchase management are coming soon.
+              <Link
+                href="/admin/access-codes"
+                className="text-brand hover:underline"
+              >
+                Manage access codes
+              </Link>
+              {" ? "}
+              <Link
+                href="/admin/purchases"
+                className="text-brand hover:underline"
+              >
+                View purchases
+              </Link>
             </p>
           </section>
         </div>

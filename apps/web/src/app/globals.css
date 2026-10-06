@@ -1,13 +1,110 @@
 @import "tailwindcss";
 
-@theme {
+@theme static {
   --color-brand: #1768ff;
   --color-brand-dark: #0755e5;
   --color-navy: #071534;
   --color-muted: #61718f;
   --color-line: #e7edf5;
+  --color-surface-page: #f4f8fc;
+  --color-brand-border: #b9d1ff;
+  --color-brand-hover: #eef5ff;
+  --color-sidebar: #0d1e34;
+  --color-sidebar-logo: #3a7cff;
+  --color-sidebar-active: #2465dc;
+  --color-surface-admin: #f5f8fc;
+  --color-admin-foreground: #081733;
+  --color-chart-primary: #246bff;
+  --color-chart-success: #21a45d;
+  --color-chart-warning: #ffaf32;
+  --color-chart-purple: #8859ef;
+  --color-chart-danger: #e44f69;
+  --color-chart-neutral: #64748b;
+  --color-chart-grid: #e8eef7;
+  --color-eyebrow: #607394;
+  --color-surface-subtle: #f8fbff;
+  --color-body-secondary: #43516b;
+  --color-feature-success: #4f9d65;
+  --color-brand-selected: #accaff;
+  --color-control-outline: #bdcadd;
+  --color-button-soft-hover: #e5edfa;
+  --color-surface-close: #f0f4fa;
+  --color-surface-selection: #f2f7ff;
+  --color-control: #c5d0e1;
+  --color-surface-disabled: #f3f5f8;
+  --color-error-soft: #fff3ee;
+  --color-error-strong: #913515;
+  --color-hero-base: #edf6fa;
+  --color-icon-soft: #eaf2ff;
+  --color-step-soft: #eff5ff;
+  --color-help-start: #eff5f9;
+  --color-help-end: #f4f8fb;
+  --color-help-icon: #e6f0fb;
+  --color-code-border: #b0caff;
+  --color-code-surface: #edf5ff;
+  --radius-control: 0.5rem;
+  --radius-panel: 0.75rem;
+  --radius-dialog: 1.25rem;
+  --shadow-navigation: 0 10px 30px #07153422;
+  --shadow-panel: 0 3px 16px rgba(30, 64, 110, 0.035);
+  --shadow-package: 0 5px 18px #162a4910;
+  --shadow-package-hover: 0 8px 24px #162a491a;
+  --shadow-action: 0 8px 24px #1768ff18;
+  --shadow-package-selected: 0 6px 20px #1768ff17;
+  --shadow-dialog: 0 30px 90px #07153430;
+  --shadow-payment-panel: 0 10px 35px #162a490c;
+  --color-success-soft: var(--color-emerald-50);
+  --color-success-strong: var(--color-emerald-700);
+  --color-warning-soft: var(--color-amber-50);
+  --color-warning-strong: var(--color-amber-700);
+  --color-danger-soft: var(--color-rose-50);
+  --color-danger-strong: var(--color-rose-600);
+  --color-info-soft: var(--color-blue-50);
+  --color-info-strong: var(--color-blue-700);
+  --color-purple-soft: var(--color-violet-50);
+  --color-purple-strong: var(--color-violet-700);
+  --color-neutral-soft: var(--color-slate-100);
+  --color-neutral-strong: var(--color-slate-600);
+  --color-surface: var(--color-white);
+  --color-on-dark: var(--color-white);
+  --color-surface-muted: var(--color-slate-50);
+  --color-surface-soft: var(--color-slate-100);
+  --color-surface-decoration: var(--color-slate-300);
+  --color-modal-shade: var(--color-slate-950);
+  --color-sidebar-text: var(--color-slate-200);
+  --color-sidebar-muted: var(--color-slate-300);
+  --color-placeholder: var(--color-slate-400);
+  --color-control-strong: var(--color-slate-300);
+  --color-info-decoration: var(--color-blue-100);
+  --color-success: var(--color-emerald-600);
+  --color-success-deep: var(--color-emerald-800);
+  --color-success-decoration: var(--color-emerald-100);
+  --color-warning: var(--color-amber-500);
+  --color-purple: var(--color-violet-600);
+  --color-danger-deep: var(--color-rose-700);
+  --color-validation-soft: var(--color-red-50);
+  --color-validation-on-dark: var(--color-red-200);
+  --color-validation: var(--color-red-600);
+  --color-validation-strong: var(--color-red-700);
+  --color-validation-deep: var(--color-red-800);
 }
 
 @theme inline {
   --font-sans: var(--font-montserrat), Arial, Helvetica, sans-serif;
+}
+
+:root {
+  --hero-overlay-mobile: linear-gradient(
+    180deg,
+    #f0f8fcf5 0%,
+    #f0f8fce8 60%,
+    #f0f8fc99 100%
+  );
+  --hero-overlay-desktop: linear-gradient(
+    90deg,
+    #f0f8fc 0%,
+    #f0f8fcdd 32%,
+    #f0f8fc55 52%,
+    transparent 72%
+  );
 }

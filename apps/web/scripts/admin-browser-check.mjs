@@ -4,7 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 
-export async function checkAdminBrowser(base, credentials) {
+export async function checkAdminBrowser(base, credentials, checkout) {
   const artifacts = resolve(".next/admin-smoke/browser");
   await mkdir(artifacts, { recursive: true });
   const browser = spawn(
@@ -58,6 +58,21 @@ export async function checkAdminBrowser(base, credentials) {
         if (message.error) waiter.reject(new Error(message.error.message));
         else waiter.resolve(message.result);
       }
+      if (message.method === "Fetch.requestPaused") {
+        // Intercept provider redirects locally: no live checkout or credentials are contacted.
+        void send(
+          "Fetch.fulfillRequest",
+          {
+            requestId: message.params.requestId,
+            responseCode: 200,
+            responseHeaders: [{ name: "Content-Type", value: "text/html" }],
+            body: Buffer.from("<p>Test provider checkout</p>").toString(
+              "base64",
+            ),
+          },
+          message.sessionId,
+        );
+      }
     };
     function send(method, params = {}, sessionId) {
       return new Promise((resolveCall, reject) => {
@@ -83,6 +98,14 @@ export async function checkAdminBrowser(base, credentials) {
     const page = (method, params) => send(method, params, sessionId);
     await page("Page.enable");
     await page("Runtime.enable");
+    // The isolated profile is reused for screenshots; never reuse its previous test session.
+    await page("Network.clearBrowserCookies");
+    await page("Fetch.enable", {
+      patterns: [
+        { urlPattern: "https://sandboxcashier.opaycheckout.com/*" },
+        { urlPattern: "https://checkout.paystack.com/*" },
+      ],
+    });
     async function evaluate(expression) {
       const result = await page("Runtime.evaluate", {
         expression,
@@ -95,7 +118,7 @@ export async function checkAdminBrowser(base, credentials) {
     }
     async function until(expression, label) {
       for (let i = 0; i < 240; i++) {
-        if (await evaluate(expression)) return;
+        if (await evaluate(`Boolean(document.body) && (${expression})`)) return;
         await pause(250);
       }
       throw new Error(
@@ -212,6 +235,10 @@ export async function checkAdminBrowser(base, credentials) {
       "document.body.innerText.includes('Welcome back')",
       "mobile dashboard",
     );
+    await until(
+      "Object.keys(document.querySelector('[aria-label=\"Open navigation\"]')).some(key => key.startsWith('__reactProps'))",
+      "mobile dashboard hydration",
+    );
     assert(
       await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"),
       "Mobile dashboard overflow",
@@ -220,6 +247,10 @@ export async function checkAdminBrowser(base, credentials) {
     // Open drawer and use the real logout mutation, then verify route protection.
     await evaluate(
       "document.querySelector('[aria-label=\"Open navigation\"]').click()",
+    );
+    await until(
+      "document.querySelector('dialog[aria-label=\"Admin navigation\"]').open",
+      "logout navigation drawer",
     );
     await evaluate(
       "document.querySelector('dialog [aria-label=\"Logout\"]').click()",
@@ -234,6 +265,126 @@ export async function checkAdminBrowser(base, credentials) {
       "location.pathname === '/admin/login'",
       "logged-out route protection",
     );
+    if (checkout) {
+      for (const provider of ["OPAY", "PAYSTACK"]) {
+        checkout.setMode("ready");
+        await page("Page.navigate", { url: base + "/" });
+        await until(
+          "Array.from(document.querySelectorAll('button')).some(e => e.innerText === 'Select Plan')",
+          "customer packages",
+        );
+        await evaluate(
+          "Array.from(document.querySelectorAll('button')).find(e => e.innerText === 'Select Plan').click()",
+        );
+        await until(
+          "document.querySelector('dialog[aria-labelledby=checkout-title]')?.open",
+          "checkout dialog",
+        );
+        await fill("phone", "08012345678");
+        await fill("email", "buyer@example.com");
+        await evaluate(
+          `document.querySelector('input[name=provider][value=${provider}]').click()`,
+        );
+        assert(
+          await evaluate(
+            "document.documentElement.scrollWidth <= innerWidth + 1",
+          ),
+          "Mobile checkout overflow",
+        );
+        await screenshot(`checkout-${provider.toLowerCase()}-mobile`);
+        await evaluate(
+          "document.querySelector('dialog button[type=submit]').click()",
+        );
+        await until(
+          `location.hostname === '${provider === "OPAY" ? "sandboxcashier.opaycheckout.com" : "checkout.paystack.com"}'`,
+          "provider redirect",
+        );
+        assert.equal(
+          JSON.parse(
+            checkout.requests
+              .filter((item) => item.path === "/payments/initialize")
+              .at(-1).body,
+          ).provider,
+          provider,
+        );
+      }
+      checkout.setMode("pending");
+      await page("Page.navigate", {
+        url:
+          base +
+          "/payment/callback?reference=PAY-random-test&status=SUCCESS&provider=OPAY",
+      });
+      await until(
+        "document.body.innerText.includes('Payment pending')",
+        "untrusted browser return stays pending",
+      );
+      assert(
+        !(await evaluate("document.body.innerText")).includes("TEST-CODE"),
+      );
+      checkout.setMode("failed");
+      await evaluate(
+        "Array.from(document.querySelectorAll('button')).find(e => e.innerText === 'Check Again').click()",
+      );
+      await until(
+        "document.body.innerText.includes('Payment failed')",
+        "verified failure state",
+      );
+      assert(
+        !(await evaluate("document.body.innerText")).includes("TEST-CODE"),
+      );
+      checkout.setMode("ready");
+      await evaluate(
+        "Array.from(document.querySelectorAll('button')).find(e => e.innerText === 'Check Again').click()",
+      );
+      await until(
+        "document.body.innerText.includes('TEST-CODE')",
+        "verified fulfillment code",
+      );
+      assert(
+        (await evaluate("document.body.innerText")).includes("Paystack"),
+        "Provider comes from backend rather than spoofed browser parameter",
+      );
+
+      checkout.setMode("unknown-init");
+      await page("Page.navigate", { url: base + "/" });
+      await until(
+        "Array.from(document.querySelectorAll('button')).some(e => e.innerText === 'Select Plan')",
+        "checkout recovery packages",
+      );
+      await evaluate(
+        "Array.from(document.querySelectorAll('button')).find(e => e.innerText === 'Select Plan').click()",
+      );
+      await until(
+        "document.querySelector('dialog[aria-labelledby=checkout-title]')?.open",
+        "recovery checkout",
+      );
+      await fill("phone", "08012345678");
+      await fill("email", "buyer@example.com");
+      await evaluate(
+        "document.querySelector('input[name=provider][value=OPAY]').click()",
+      );
+      await evaluate(
+        "document.querySelector('dialog button[type=submit]').click()",
+      );
+      await until(
+        "document.querySelector('dialog')?.innerText.includes('PAY-random-test')",
+        "uncertain initialization reference",
+      );
+      assert(
+        await evaluate(
+          "document.querySelector('dialog button[type=submit]').disabled && document.querySelector('input[name=provider]').matches(':disabled')",
+        ),
+        "Unresolved attempt prevents provider switching/retry",
+      );
+      assert.equal(
+        await evaluate("sessionStorage.getItem('anka-payment-reference')"),
+        "PAY-random-test",
+      );
+      checkout.setMode("ready");
+      console.log(
+        "PASS: mobile Paystack/OPay selection and redirects, unknown initialization recovery, pending/failed states, spoofed browser return, backend-confirmed code and provider.",
+      );
+    }
     console.log(
       "PASS: browser login/logout, Recharts empty states, package form creation/cache invalidation, desktop/mobile overflow, mobile drawer and form dialog.",
     );

@@ -118,6 +118,10 @@ describe('payment DTO boundaries', () => {
     { purchaseReference: '' },
     { purchaseReference: 'ANK-test', amount: 1 },
     { purchaseReference: 'ANK-test', status: 'SUCCESSFUL' },
+    { purchaseReference: 'ANK-test', provider: 'OPAY', amount: 1 },
+    { purchaseReference: 'ANK-test', provider: 'MANUAL' },
+    { purchaseReference: 'ANK-test', provider: 'FLUTTERWAVE' },
+    { purchaseReference: 'ANK-test', provider: null },
   ])('rejects missing or controlled checkout fields', async (body) => {
     await request(app.getHttpServer())
       .post('/payments/initialize')
