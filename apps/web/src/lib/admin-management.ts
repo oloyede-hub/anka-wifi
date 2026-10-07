@@ -38,6 +38,7 @@ export function useAdminPackages() {
   const request = useAuthenticatedFetch();
   return useQuery({
     queryKey: ["admin", "packages"],
+    staleTime: 5 * 60_000,
     queryFn: async ({ signal }) => {
       const all = [];
       for (let offset = 0; offset < 10000; offset += 100) {

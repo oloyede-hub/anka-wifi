@@ -15,8 +15,9 @@ export function useDashboardAnalytics() {
       dashboardAnalyticsSchema.parse(
         await request("reports/overview", { signal }),
       ),
-    staleTime: 30000,
-    refetchInterval: 60000,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
     retry: false,
   });
 }

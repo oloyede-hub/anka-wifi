@@ -13,6 +13,7 @@ import { loginAdmin, logoutAdmin } from "./admin-api";
 export function usePackages() {
   return useQuery({
     queryKey: ["packages", "active"],
+    staleTime: 5 * 60_000,
     queryFn: ({ signal }) => getPackages(signal),
     select: (packages) => packages.filter((item) => item.status === "ACTIVE"),
   });
