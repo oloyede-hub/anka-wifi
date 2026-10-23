@@ -1,7 +1,6 @@
 "use client";
 import { Button } from "@/components/ui/Button";
 export default function AdminError({ reset }: { reset: () => void }) {
-  console.log("The Error page")
   return (
     <main className="grid min-h-screen place-content-center gap-4 bg-surface-muted p-6 text-center">
       <h1 className="text-2xl font-bold">Admin service unavailable</h1>
